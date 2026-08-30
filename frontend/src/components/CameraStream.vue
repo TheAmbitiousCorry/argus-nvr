@@ -11,8 +11,14 @@ const props = withDefaults(
     /** Whether this view wants live video right now. */
     active: boolean
     fit?: 'cover' | 'contain'
+    /**
+     * How badly this view wants a stream rather than stills. The large feed on
+     * the wall asks louder than the small ones, so it is never the one left on
+     * snapshots.
+     */
+    priority?: number
   }>(),
-  { fit: 'cover' },
+  { fit: 'cover', priority: 0 },
 )
 
 /** A transparent pixel. Assigning it aborts an MJPEG connection without a request. */
@@ -27,7 +33,10 @@ const RETRY_MAX_MS = 30000
 type Phase = 'idle' | 'connecting' | 'live' | 'failed'
 
 const wanted = computed(() => props.active && props.online)
-const hasSlot = useStreamSlot(wanted)
+const hasSlot = useStreamSlot(
+  wanted,
+  computed(() => props.priority),
+)
 
 const phase = ref<Phase>('idle')
 const failures = ref(0)
