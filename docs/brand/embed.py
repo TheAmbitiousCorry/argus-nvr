@@ -17,14 +17,28 @@ FW = NVR.parent / "esp32-cam-fw"
 
 
 def load(name):
-    """The marks are filled outlines in two paths: the creature, and its pupils.
-    Nothing is stroked, so there is no stroke width to carry across."""
-    s = re.sub(r"\n\s*", "", (BRAND / name).read_text()).strip()
-    head = s[: s.index(">") + 1]
+    """Normalises one of the traced marks into something embeddable.
+
+    The files are traced artwork: an XML declaration, a doctype, a size in
+    points, and the drawing inside a group that flips the y axis. None of that
+    survives being inlined, and the fixed size in particular would override
+    whatever the page asks for. What is kept is the viewBox, the transform, and
+    the paths, with the black swapped for currentColor so a mark takes the
+    colour of whatever it sits in.
+    """
+    raw = (BRAND / name).read_text()
+    viewbox = re.search(r'viewBox="([^"]+)"', raw).group(1)
+    transform = re.search(r'transform="([^"]+)"', raw).group(1)
+    paths = [re.sub(r"\s+", " ", d).strip()
+             for d in re.findall(r'<path d="([^"]+)"', raw)]
+    inner = ('<g transform="%s" fill="currentColor" stroke="none">%s</g>'
+             % (transform, "".join('<path d="%s"/>' % d for d in paths)))
     return {
-        "svg": s,
-        "paths": re.findall(r"<path d='([^']+)'/>", s),
-        "viewbox": re.search(r"viewBox='([^']+)'", head).group(1),
+        "svg": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="%s">%s</svg>' % (viewbox, inner),
+        "inner": inner,
+        "paths": paths,
+        "transform": transform,
+        "viewbox": viewbox,
     }
 
 
@@ -48,15 +62,17 @@ def sub(path, pattern, repl, count=1):
 
 eye, mark = load("argus-eye.svg"), load("argus-mark.svg")
 
-# 1. Firmware: the two paths as C string literals, plus the favicon as a data
-# URI. A coordinate list this long is broken across lines the compiler joins.
-def wrap(d, width=96):
+# 1. Firmware: the drawing as one C string, split where the compiler rejoins it,
+# plus the favicon as a data URI. Double quotes inside the markup become single
+# ones so the literal does not need escaping on every attribute.
+def wrap(text, width=94):
+    text = text.replace('"', "'")
     out, line = [], ""
-    for piece in re.findall(r"[ML][^ML]*|Z", d):
-        if len(line) + len(piece) > width:
+    for word in re.findall(r"\S+\s*", text):
+        if line and len(line) + len(word) > width:
             out.append(line)
             line = ""
-        line += piece
+        line += word
     if line:
         out.append(line)
     return "\n    ".join('"%s"' % l for l in out)
@@ -66,12 +82,11 @@ sub(
     r'static const char ARGUS_EYE\[\] =.*?"</svg>";',
     (
         "static const char ARGUS_EYE[] =\n"
-        "    \"<svg viewBox='%s' fill='currentColor' fill-rule='nonzero' aria-hidden='true'>\"\n"
-        "    \"<path d=\'\"\n    %s\n    \"\'/>\"\n"
-        "    \"<path d=\'\"\n    %s\n    \"\'/>\"\n"
+        "    \"<svg viewBox='%s' aria-hidden='true'>\"\n"
+        "    %s\n"
         '    "</svg>";'
     )
-    % (eye["viewbox"], wrap(eye["paths"][0]), wrap(eye["paths"][1])),
+    % (eye["viewbox"], wrap(eye["inner"])),
 )
 sub(
     FW / "src/web.cpp",
@@ -87,13 +102,11 @@ for name in ("argus-eye.svg", "argus-mark.svg"):
 sub(
     NVR / "frontend/src/App.vue",
     r'<svg class="mark".*?</svg>',
-    (
-        '<svg class="mark" viewBox="%s" fill="currentColor" fill-rule="nonzero" aria-hidden="true">\n'
-        '          <path d="%s" />\n'
-        '          <path d="%s" />\n'
-        "        </svg>"
-    )
-    % (mark["viewbox"], mark["paths"][0], mark["paths"][1]),
+    ('<svg class="mark" viewBox="%s" aria-hidden="true">\n'
+     '          <g transform="%s" fill="currentColor" stroke="none">\n%s\n          </g>\n'
+     "        </svg>")
+    % (mark["viewbox"], mark["transform"],
+       "\n".join('            <path d="%s" />' % d for d in mark["paths"])),
 )
 
 # 4. Behind the pages.
