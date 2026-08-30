@@ -9,7 +9,12 @@
 //
 // The version is part of the cache name. Changing it is what retires the old
 // one, and the old one is deleted on activate rather than left to accumulate.
-const VERSION = 'argus-v1'
+const VERSION = 'argus-v2'
+// The shell is precached so the app opens with no network. '/' is in here
+// because it is what an offline visit needs, but it is also the file that names
+// every hashed chunk, so it is only ever served from the cache when the network
+// could not answer at all. Anything fetched from the cache while the network is
+// up would hand a tab filenames that no longer exist.
 const SHELL = ['/', '/manifest.webmanifest', '/argus-mark.svg', '/argus-eye.svg']
 
 self.addEventListener('install', (event) => {

@@ -242,3 +242,60 @@ Recordings made before a camera's clock reached an NTP server are numbered
 rather than dated, and the camera lists them separately. They are skipped: a
 recording is identified by camera, day and start time, and something with no day
 cannot be stored under that scheme or asked for again later.
+
+## Watching what is held
+
+Written before the interface for it, so both halves have the same document.
+
+### The thing that decides the design
+
+A browser cannot play these recordings. They are MJPEG inside AVI, which no
+browser decodes natively, so a `<video>` element pointed at the download URL
+shows nothing. Transcoding them is not on offer either: a service that re-encodes
+footage on demand is a service that falls over the first time two people scrub
+at once.
+
+The camera solved this already. Its playback page replays a recording as
+`multipart/x-mixed-replace`, the same format the live view uses, so an ordinary
+`<img>` plays it with no decoding in the page at all. This does the same for what
+the service holds.
+
+### `GET /api/recordings/{cameraId}/{day}/{at}/stream`
+
+Replays a held recording as `multipart/x-mixed-replace`, paced from the
+timestamps in the file so a gap in a recording replays as a gap rather than
+being played at a guessed rate.
+
+```
+?from=<n>   start at frame n, so seeking does not replay from the beginning
+?speed=<x>  0.5, 1, 2, 4; 0 sends frames as fast as they can be read
+```
+
+The connection ends when the recording does. A client that wants it again asks
+again.
+
+### `GET /api/recordings/{cameraId}/{day}/{at}/frames`
+
+The frame index, so a scrubber knows where it can land without downloading the
+whole file first.
+
+```json
+{ "frames": 213, "durMs": 9992, "width": 800, "height": 600,
+  "times": [0, 47, 94] }
+```
+
+`times` is milliseconds from the start of the recording, one per frame.
+
+### Camera firmware, in the camera list
+
+`GET /api/cameras` carries what each camera reports from its own `/version`,
+under a `firmware` key, passed through unchanged so a field the firmware gains
+needs no change here.
+
+```json
+{ "version": "1a6ee31", "built": "Aug 31 2026 00:04:09",
+  "slot": "1/1", "onTrial": false, "rolledBackFrom": "" }
+```
+
+Absent when the camera has not answered. Read on the same poll as everything
+else rather than on its own timer: it changes about once a day.
