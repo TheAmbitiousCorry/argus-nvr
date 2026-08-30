@@ -5,7 +5,14 @@ services:
     # bridge network does not carry it. This is why the port is not published.
     network_mode: host
     volumes:
-      - ./data:/data
+      # A named volume rather than a bind mount. This file holds the camera
+      # passwords, and the service runs as a non-root user, so a directory on the
+      # host would have to be given that user's ownership before anything worked.
+      # To read it: docker compose cp nvr:/data/cameras.json ./cameras.json
+      - nvr-data:/data
     environment:
       - NVR_ADDR=:8080
     restart: unless-stopped
+
+volumes:
+  nvr-data:

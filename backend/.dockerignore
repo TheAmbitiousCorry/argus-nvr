@@ -1,7 +1,0 @@
-.git
-data
-web
-*.md
-Dockerfile
-.dockerignore
-.gomodcache
