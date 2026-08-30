@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"argus-nvr/internal/archive"
 	"argus-nvr/internal/camera"
 	"argus-nvr/internal/discovery"
 	"argus-nvr/internal/manager"
@@ -33,13 +34,15 @@ type Server struct {
 	store      *store.Store
 	manager    *manager.Manager
 	discoverer *discovery.Discoverer
+	archive    *archive.Store
 	static     http.Handler
 }
 
 // New builds the handler tree. staticDir may be empty, in which case only the
-// API is served.
-func New(st *store.Store, mgr *manager.Manager, disc *discovery.Discoverer, staticDir string) *Server {
-	s := &Server{store: st, manager: mgr, discoverer: disc}
+// API is served, and arch may be nil, in which case the service holds no
+// recordings and says so rather than pretending to hold none.
+func New(st *store.Store, mgr *manager.Manager, disc *discovery.Discoverer, arch *archive.Store, staticDir string) *Server {
+	s := &Server{store: st, manager: mgr, discoverer: disc, archive: arch}
 	if staticDir != "" {
 		s.static = spaHandler(staticDir)
 	}
@@ -59,6 +62,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/cameras/{id}/snapshot", s.snapshot)
 	mux.HandleFunc("GET /api/cameras/{id}/stream", s.stream)
 	mux.HandleFunc("GET /api/discovered", s.discovered)
+	mux.HandleFunc("GET /api/recordings", s.listRecordings)
+	mux.HandleFunc("GET /api/recordings/days", s.recordingDays)
+	mux.HandleFunc("GET /api/recordings/{cameraId}/{day}/{at}", s.recording)
+	mux.HandleFunc("GET /api/storage", s.storage)
 	mux.HandleFunc("POST /api/settings", s.bulkSettings)
 	mux.HandleFunc("POST /api/firmware", s.bulkFirmware)
 

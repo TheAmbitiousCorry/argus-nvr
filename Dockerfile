@@ -38,8 +38,8 @@ FROM gcr.io/distroless/static-debian12:nonroot
 
 WORKDIR /app
 
-# The camera list holds passwords, so it lives on a mounted volume rather than
-# baked into the image.
+# The camera list holds passwords and the recordings are the point of the
+# service, so both live on a mounted volume rather than in the image.
 VOLUME ["/data"]
 
 COPY --from=build /out/nvr /app/nvr
@@ -50,4 +50,4 @@ EXPOSE 8080
 USER nonroot:nonroot
 
 ENTRYPOINT ["/app/nvr"]
-CMD ["-addr", ":8080", "-data", "/data/cameras.json", "-static", "/app/web"]
+CMD ["-addr", ":8080", "-data", "/data/cameras.json", "-recordings", "/data/recordings", "-static", "/app/web"]

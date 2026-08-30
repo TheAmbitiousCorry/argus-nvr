@@ -43,6 +43,14 @@ export interface CameraStatus {
   grabMs?: number
   writeMs?: number
   indexMs?: number
+  /**
+   * Whether the camera can keep what it records. A camera reporting anything
+   * but `ok` still reports its triggers, and the service records those from the
+   * stream it already holds.
+   */
+  storage?: 'ok' | 'missing' | 'unwritable'
+  /** True while a recording is running that the camera itself cannot write. */
+  cardless?: boolean
   /** Scene brightness out of 255, and where auto exposure has settled. */
   lux?: number
   rung?: number

@@ -54,9 +54,10 @@ type Client struct {
 	// always uses 81.
 	streamPort string
 
-	api    *http.Client
-	stream *http.Client
-	upload *http.Client
+	api      *http.Client
+	stream   *http.Client
+	upload   *http.Client
+	download *http.Client
 
 	mu  sync.Mutex
 	sid string
@@ -96,6 +97,20 @@ func New(cam store.Camera) *Client {
 				ResponseHeaderTimeout: uploadHeaderTimeout,
 			},
 		},
+		download: &http.Client{
+			// No client timeout: a recording runs to tens of megabytes off a
+			// card, over a radio it is sharing with the live view, and a clip
+			// that takes a minute to arrive is arriving rather than stuck.
+			// What is bounded is the wait for the first byte, which is what
+			// tells a slow camera apart from an absent one.
+			CheckRedirect: noRedirect,
+			Transport: &http.Transport{
+				// The camera has a handful of sockets. A pooled connection
+				// held open after a download is one a viewer cannot have.
+				DisableKeepAlives:     true,
+				ResponseHeaderTimeout: requestTimeout,
+			},
+		},
 		stream: &http.Client{
 			// No client timeout: an MJPEG response body is meant to never end.
 			// The transport still bounds the time spent waiting for headers so
@@ -124,6 +139,15 @@ func (c *Client) streamURL(path string) string {
 // Get issues an authenticated GET against the camera's port 80 API.
 func (c *Client) Get(ctx context.Context, path string) (*http.Response, error) {
 	return c.do(ctx, c.api, func(ctx context.Context) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL()+path, nil)
+	})
+}
+
+// GetLarge issues an authenticated GET for a body too large to fetch under the
+// ordinary request timeout, which bounds the whole exchange rather than the
+// wait for a reply. The caller owns the body and must close it.
+func (c *Client) GetLarge(ctx context.Context, path string) (*http.Response, error) {
+	return c.do(ctx, c.download, func(ctx context.Context) (*http.Request, error) {
 		return http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL()+path, nil)
 	})
 }

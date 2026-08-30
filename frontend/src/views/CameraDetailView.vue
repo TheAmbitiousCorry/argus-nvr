@@ -28,12 +28,31 @@ const removeError = ref<string | null>(null)
 
 type Row = { label: string; value: string; tone?: 'good' | 'bad' }
 
+const STORAGE: Record<string, string> = {
+  ok: 'card ready',
+  missing: 'no card, recorded by Argus',
+  unwritable: 'card present but not writable',
+}
+
 const rows = computed<Row[]>(() => {
   const s = status.value
   if (!s) return []
   return [
-    { label: 'Recording', value: s.active ? 'yes' : 'no', tone: s.active ? 'bad' : undefined },
+    {
+      label: 'Recording',
+      value: s.active ? (s.cardless ? 'yes, recorded here' : 'yes') : 'no',
+      tone: s.active ? 'bad' : undefined,
+    },
     { label: 'Trigger', value: s.triggered ? 'motion' : 'manual or idle' },
+    {
+      // The one reading that says whether this camera can keep what it records.
+      // A camera with no card still reports its triggers, and Argus records
+      // those from the stream it already holds, so "missing" is a state to see
+      // rather than a failure to hide.
+      label: 'Storage',
+      value: STORAGE[s.storage ?? ''] ?? 'unknown',
+      tone: s.storage === 'ok' ? 'good' : s.storage ? 'bad' : undefined,
+    },
     { label: 'Frames in clip', value: String(s.frames) },
     { label: 'Frame rate', value: `${s.fps.toFixed(1)} fps` },
     { label: 'Motion detection', value: s.motion ? 'enabled' : 'off' },

@@ -114,7 +114,7 @@ func startFleet(t *testing.T, devices ...*fakeDevice) (*Manager, []string) {
 	t.Helper()
 
 	f := &fleet{}
-	m := New()
+	m := New(nil)
 	t.Cleanup(m.Close)
 
 	cams := make([]store.Camera, 0, len(devices))

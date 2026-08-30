@@ -45,9 +45,10 @@ nothing to build by hand and no web server to put in front.
 Host networking is deliberate: mDNS discovery needs multicast, which a bridge
 network does not carry. That is also why no port is published.
 
-The camera passwords live in a named volume rather than a directory on the host,
-because the service runs as a non-root user and a bind mount would need that
-user's ownership before anything worked. The file is written 0600. To read it:
+The camera passwords and the recordings live in a named volume rather than a
+directory on the host, because the service runs as a non-root user and a bind
+mount would need that user's ownership before anything worked. The camera list
+is written 0600. To read it:
 
 ```bash
 docker compose cp nvr:/data/cameras.json ./cameras.json
@@ -57,14 +58,21 @@ docker compose cp nvr:/data/cameras.json ./cameras.json
 
 ```bash
 cd frontend && npm ci && npm run build
-cd ../backend && go run . -addr :8080 -static ../frontend/dist -data ./data/cameras.json
+cd ../backend && go run . -addr :8080 -static ../frontend/dist \
+  -data ./data/cameras.json -recordings ./data/recordings
 ```
+
+`-recordings` is where footage taken off the cameras is kept, and
+`-recordings-max-bytes` is the size it is aged down to, oldest first, 20GB by
+default. An empty `-recordings` turns both off: cameras are still watched and
+proxied, nothing is kept.
 
 ## Layout
 
 - `backend/`  Go service: camera registry, mDNS discovery, session handling, stream proxy
 - `frontend/` Vue interface, built to static files the backend serves
 - `docs/camera-api.md` what the cameras expose, written from the firmware
+- `docs/islanding.md` how footage gets off a camera and what the service serves
 
 ## State of it
 
@@ -77,12 +85,17 @@ This is a learning project rather than a product. There are no accounts, no TLS,
 and no authentication in front of the service itself, so it belongs on a trusted
 network and nowhere else.
 
+Footage now outlives the camera it was recorded on. The service pulls recordings
+off each camera's card in the background and records on behalf of a camera that
+has no usable card, keeping both under one retention limit on the data volume.
+Measured against real hardware, nine recordings came off a camera's card
+untouched and ffprobe read every frame of each. `docs/islanding.md` has the
+design and the routes.
+
 ## Not yet built
 
-Recording to this machine. The cameras keep footage on their own SD cards and
-have no way to push it anywhere, so an FTP or upload receiver here would have
-nothing to receive. That needs firmware work first, and it is on the firmware
-repository's roadmap.
+An interface for any of it. The recordings are listed and served over the API,
+and nothing in the Vue app shows them yet.
 
 ## Licence
 
