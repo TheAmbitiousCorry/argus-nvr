@@ -32,8 +32,12 @@ GET  /capture                     one JPEG
 The stream is on port 81, everything else on port 80. Cookies are scoped by
 host and ignore the port, so one session covers both.
 
-Measured on one camera at 640x480: about 10 frames per second, 36KB a frame.
-Frame rate is limited by Wi-Fi rather than by the device.
+Measured on one camera at 640x480: 22 to 24 frames per second, about 19KB a
+frame. Frame rate is limited by Wi-Fi rather than by the device.
+
+Round trips are slow and vary a lot: pings between 5ms and 620ms, HTTP round
+trips up to 3 seconds when the camera is busy. Timeouts under about 10 seconds
+report a healthy camera as offline.
 
 ## State
 
@@ -48,8 +52,16 @@ GET  /record     JSON, no side effects despite the name:
                   "change":int,         percent of the scene changing now
                   "threshold":int,      percent needed to trigger
                   "preFrames":int,      frames of pre-trigger history buffered
-                  "preSecs":int}
+                  "preSecs":int,
+                  "lux":int,            mean scene brightness, 0 to 255
+                  "rung":int,           auto exposure position, 0 to 10
+                  "ael":int,            exposure compensation in effect now
+                  "gc":int}             gain ceiling in effect now
 POST /record     toggles recording, returns text
+POST /image      form-encoded: autoimg, ael, gc, bri, con, sat, wb, flashlvl,
+                 gray, hmir, vflip. Returns "ok", or a comma-separated list of
+                 the controls this sensor refused. Under autoimg=1 the camera
+                 owns ael and gc and ignores them in the form.
 GET  /status     HTML table, one <tr><th>key</th><td>value</td></tr> per row
 ```
 
@@ -79,5 +91,9 @@ over-the-air firmware updates.
 ## Notes that matter
 
 The camera is a single-core-ish microcontroller with one camera and one radio.
+The camera holds twelve sessions and evicts the oldest. A recorder holding one
+permanently shares that pool with anyone opening the camera's own page, so plan
+to be signed out and to sign back in without reporting the camera as offline.
+
 Two clients streaming from it halves the frame rate each. Poll `/record` at a
 couple of seconds, not faster.
