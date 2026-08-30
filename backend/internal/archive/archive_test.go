@@ -139,7 +139,7 @@ func TestIdentityIsCheckedBeforeItBecomesAPath(t *testing.T) {
 		if _, err := s.Create(id); err == nil {
 			t.Errorf("%q was accepted to record into", id)
 		}
-		if _, _, err := s.Open(id); err != ErrNotFound {
+		if _, _, _, err := s.Open(id); err != ErrNotFound {
 			t.Errorf("%q was looked up rather than refused: %v", id, err)
 		}
 	}
@@ -358,7 +358,7 @@ func TestRecordedFileIsWellFormed(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	data, err := os.ReadFile(s.Path(id))
+	data, err := os.ReadFile(s.File(id, FormatAVI))
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}

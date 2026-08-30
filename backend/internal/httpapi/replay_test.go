@@ -225,7 +225,7 @@ func TestReplayingSomethingThatIsNotARecording(t *testing.T) {
 	h, arch, _ := serverWithRecordings(t)
 	// Bypass Save, which checks the file is an AVI, to leave the kind of file a
 	// half-finished write from an older version might have left.
-	path := arch.Path(recordingIDFor("a1b2", "2026-08-30", "131529"))
+	path := arch.File(recordingIDFor("a1b2", "2026-08-30", "131529"), archive.FormatAVI)
 	if err := writeFile(path, []byte("RIFF\x04\x00\x00\x00AVI ")); err != nil {
 		t.Fatalf("write: %v", err)
 	}

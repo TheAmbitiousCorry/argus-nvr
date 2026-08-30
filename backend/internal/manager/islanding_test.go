@@ -304,7 +304,7 @@ func TestPullRetriesAnInterruptedDownload(t *testing.T) {
 	if len(recs) != 1 {
 		t.Fatalf("the retry did not land: %+v", recs)
 	}
-	data, err := os.ReadFile(arch.Path(recs[0].ID()))
+	data, err := os.ReadFile(arch.File(recs[0].ID(), archive.FormatAVI))
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
@@ -388,7 +388,7 @@ func TestRecordsForACameraThatCannot(t *testing.T) {
 	if recs[0].CameraID != "cam1" {
 		t.Errorf("stored under camera %q", recs[0].CameraID)
 	}
-	data, err := os.ReadFile(arch.Path(recs[0].ID()))
+	data, err := os.ReadFile(arch.File(recs[0].ID(), archive.FormatAVI))
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
@@ -449,5 +449,83 @@ func TestAVeryShortRecordingIsNotKept(t *testing.T) {
 	}
 	if usage.Bytes != 0 {
 		t.Errorf("%d bytes left behind by a recording that was thrown away", usage.Bytes)
+	}
+}
+
+// noteTranscoder records what it was offered, in the order it was offered.
+type noteTranscoder struct {
+	mu  sync.Mutex
+	ids []archive.ID
+}
+
+func (n *noteTranscoder) Add(id archive.ID) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.ids = append(n.ids, id)
+}
+
+func (n *noteTranscoder) seen() []archive.ID {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]archive.ID(nil), n.ids...)
+}
+
+// A recording is offered for transcoding only once it is stored under its real
+// name, and a download that never landed is never offered at all. Transcoding
+// happens after the recording is safe, never between the camera and the disk.
+func TestPullOffersStoredRecordingsForTranscoding(t *testing.T) {
+	card := &fakeCard{days: map[string][]camera.Recording{"2026-08-30": recordingsOf(2)}}
+	d, arch, _ := deviceFor(t, card)
+	notes := &noteTranscoder{}
+	d.transcode = notes
+
+	d.pullOnce(context.Background())
+
+	recs, _, err := arch.List(archive.Filter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Fatalf("held %d recordings", len(recs))
+	}
+	offered := notes.seen()
+	if len(offered) != 2 {
+		t.Fatalf("offered %d recordings for transcoding, held %d", len(offered), len(recs))
+	}
+	for _, id := range offered {
+		if !arch.Has(id) {
+			t.Errorf("%s was offered for transcoding but is not held", id)
+		}
+	}
+}
+
+// A download that arrived cut short is thrown away, and nothing is asked to
+// re-encode a recording that does not exist.
+func TestAnInterruptedDownloadIsNeverOfferedForTranscoding(t *testing.T) {
+	card := &fakeCard{
+		days:     map[string][]camera.Recording{"2026-08-30": recordingsOf(1)},
+		truncate: true,
+	}
+	d, _, _ := deviceFor(t, card)
+	notes := &noteTranscoder{}
+	d.transcode = notes
+
+	d.pullOnce(context.Background())
+
+	if offered := notes.seen(); len(offered) != 0 {
+		t.Errorf("a download that never landed was offered for transcoding: %v", offered)
+	}
+}
+
+// A service with no ffmpeg pulls exactly as it did before.
+func TestPullingWorksWithoutATranscoder(t *testing.T) {
+	card := &fakeCard{days: map[string][]camera.Recording{"2026-08-30": recordingsOf(1)}}
+	d, arch, _ := deviceFor(t, card)
+	d.transcode = nil
+
+	d.pullOnce(context.Background())
+
+	if recs, _, _ := arch.List(archive.Filter{}); len(recs) != 1 {
+		t.Errorf("held %d recordings without a transcoder", len(recs))
 	}
 }

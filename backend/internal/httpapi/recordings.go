@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"argus-nvr/internal/archive"
 )
@@ -75,25 +74,31 @@ func (s *Server) recordingDays(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"days": days})
 }
 
-// recording serves one AVI off the data volume.
+// contentTypes is what each form of a recording goes out as. A transcoded
+// recording is served as MP4 from the same URL the AVI was served from, because
+// the form is not part of the identity and nothing that already points at a
+// recording should break when it is transcoded.
+var contentTypes = map[string]string{
+	archive.FormatAVI: "video/x-msvideo",
+	archive.FormatMP4: "video/mp4",
+}
+
+// recording serves one recording off the data volume, in whichever form it is
+// held in.
 //
 // http.ServeContent rather than a copy, because it answers range requests: a
 // video element seeking in a clip asks for the middle of the file, and without
-// ranges it downloads the whole thing again for every scrub.
+// ranges it downloads the whole thing again for every scrub. That matters far
+// more now that a transcoded recording is played by a video element that seeks
+// for real rather than replayed frame by frame.
 func (s *Server) recording(w http.ResponseWriter, r *http.Request) {
 	if s.archive == nil {
 		writeError(w, http.StatusNotFound, "this service is not holding recordings")
 		return
 	}
-	id := archive.ID{
-		CameraID: r.PathValue("cameraId"),
-		Day:      r.PathValue("day"),
-		// The extension is optional, so the same URL can be pasted into a
-		// player that decides what to do from the name.
-		At: strings.TrimSuffix(r.PathValue("at"), ".avi"),
-	}
+	id := recordingID(r)
 
-	f, info, err := s.archive.Open(id)
+	f, info, format, err := s.archive.Open(id)
 	if errors.Is(err, archive.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "no such recording")
 		return
@@ -104,11 +109,17 @@ func (s *Server) recording(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
-	name := id.CameraID + "-" + id.Day + "-" + id.At + ".avi"
-	w.Header().Set("Content-Type", "video/x-msvideo")
+	name := id.CameraID + "-" + id.Day + "-" + id.At + "." + format
+	w.Header().Set("Content-Type", contentTypes[format])
 	w.Header().Set("Content-Disposition", `inline; filename="`+name+`"`)
-	// A recording never changes once it is held, so it is worth caching hard.
-	w.Header().Set("Cache-Control", "private, max-age=86400")
+	w.Header().Set("Cache-Control", "private, no-cache")
+	// Cached, but revalidated every time. A recording used to be immutable and
+	// this was cached for a day; transcoding changes the bytes at this URL
+	// without changing the URL, and a browser holding the AVI it fetched this
+	// morning would keep playing it through the replay long after the service
+	// had an MP4 to offer. ServeContent answers a revalidation from the
+	// modification time, so the cost is one 304 and the body is still not sent
+	// twice.
 	http.ServeContent(w, r, name, info.ModTime(), f)
 }
 

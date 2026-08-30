@@ -85,6 +85,18 @@ type CameraView struct {
 	Firmware json.RawMessage `json:"firmware,omitempty"`
 }
 
+// Transcoder is handed every recording once it is safely stored, to be
+// re-encoded into something a tenth of the size that a browser can play. It is
+// an interface and may be nil, because the service runs on machines with no
+// ffmpeg and the design says plainly that a missing encoder costs disk rather
+// than footage.
+//
+// Nothing here waits on it. Transcoding happens after a recording is on the
+// disk under its real name, never between the camera and the disk.
+type Transcoder interface {
+	Add(archive.ID)
+}
+
 // frameSource is where a recording made on a camera's behalf gets its frames.
 // It is the stream fan-out in every real case; naming it lets a test hand the
 // recorder frames without a camera on the other end of a socket.
@@ -98,8 +110,11 @@ type device struct {
 	hub    *camera.Hub
 	frames frameSource
 	arch   *archive.Store
-	cancel context.CancelFunc
-	done   chan struct{}
+	// transcode is nil when nothing on this machine can encode H.264, which is
+	// a service that holds larger recordings rather than a service that fails.
+	transcode Transcoder
+	cancel    context.CancelFunc
+	done      chan struct{}
 	// pullDone and standInDone are nil when there is no archive to write to,
 	// which is what running without a data volume looks like.
 	pullDone    chan struct{}
@@ -134,7 +149,8 @@ type device struct {
 
 // Manager keeps devices in step with the configured camera list.
 type Manager struct {
-	arch *archive.Store
+	arch      *archive.Store
+	transcode Transcoder
 
 	mu      sync.RWMutex
 	devices map[string]*device
@@ -143,9 +159,10 @@ type Manager struct {
 
 // New returns an empty manager; call Sync to populate it. arch may be nil, in
 // which case cameras are watched and proxied but nothing is pulled off their
-// cards and nothing is recorded on their behalf.
-func New(arch *archive.Store) *Manager {
-	return &Manager{arch: arch, devices: make(map[string]*device)}
+// cards and nothing is recorded on their behalf. tr may be nil, in which case
+// recordings are held in the form they arrived in.
+func New(arch *archive.Store, tr Transcoder) *Manager {
+	return &Manager{arch: arch, transcode: tr, devices: make(map[string]*device)}
 }
 
 // Sync starts devices for newly added cameras and stops those removed. It is
@@ -189,14 +206,15 @@ func (m *Manager) startLocked(c store.Camera) *device {
 	hub := camera.NewHub(client)
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &device{
-		cam:    c,
-		client: client,
-		hub:    hub,
-		frames: hub,
-		arch:   m.arch,
-		cancel: cancel,
-		done:   make(chan struct{}),
-		status: Status{CheckedAt: time.Now()},
+		cam:       c,
+		client:    client,
+		hub:       hub,
+		frames:    hub,
+		arch:      m.arch,
+		transcode: m.transcode,
+		cancel:    cancel,
+		done:      make(chan struct{}),
+		status:    Status{CheckedAt: time.Now()},
 	}
 	go d.poll(ctx)
 	if d.arch != nil {

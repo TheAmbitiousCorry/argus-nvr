@@ -71,7 +71,7 @@ func serverWithRecordings(t *testing.T) (http.Handler, *archive.Store, []byte) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	api := New(st, manager.New(nil), discovery.New(), arch, "")
+	api := New(st, manager.New(nil, nil), discovery.New(), arch, "")
 	return api.Handler(), arch, clip
 }
 
@@ -213,7 +213,7 @@ func TestWithoutAnArchive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	h := New(st, manager.New(nil), discovery.New(), nil, "").Handler()
+	h := New(st, manager.New(nil, nil), discovery.New(), nil, "").Handler()
 	for _, path := range []string{"/api/recordings", "/api/recordings/days", "/api/storage"} {
 		if w := get(t, h, path); w.Code != http.StatusNotFound {
 			t.Errorf("%s gave %d", path, w.Code)
@@ -237,12 +237,125 @@ func TestCameraPasswordsNeverLeave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open archive: %v", err)
 	}
-	h := New(st, manager.New(arch), discovery.New(), arch, "").Handler()
+	h := New(st, manager.New(arch, nil), discovery.New(), arch, "").Handler()
 
 	for _, path := range []string{"/api/cameras", "/api/recordings", "/api/recordings/days", "/api/storage", "/healthz"} {
 		w := get(t, h, path)
 		if strings.Contains(w.Body.String(), secret) {
 			t.Errorf("%s answered with the camera's password", path)
 		}
+	}
+}
+
+// transcodeInPlace stands a transcoded recording up on the disk the way the
+// transcoder leaves one: the MP4 under the same identity, and the AVI gone.
+func transcodeInPlace(t *testing.T, arch *archive.Store, id archive.ID) {
+	t.Helper()
+	if err := os.WriteFile(arch.File(id, archive.FormatMP4), []byte("\x00\x00\x00\x18ftypmp42fake mp4 body"), 0o600); err != nil {
+		t.Fatalf("write mp4: %v", err)
+	}
+	if err := os.Remove(arch.File(id, archive.FormatAVI)); err != nil {
+		t.Fatalf("remove avi: %v", err)
+	}
+}
+
+// The listing says which form each recording is in, because that is what
+// decides whether the interface can use a video element or has to fall back to
+// the frame-by-frame replay.
+func TestTheListingSaysWhichFormEachRecordingIsIn(t *testing.T) {
+	h, arch, _ := serverWithRecordings(t)
+	transcodeInPlace(t, arch, archive.ID{CameraID: "a1b2", Day: "2026-08-30", At: "131529"})
+
+	w := get(t, h, "/api/recordings")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body)
+	}
+	var doc struct {
+		Recordings []archive.Recording `json:"recordings"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	forms := map[string]string{}
+	for _, r := range doc.Recordings {
+		forms[r.At] = r.Format
+	}
+	if forms["131529"] != archive.FormatMP4 {
+		t.Errorf("the transcoded recording lists as %q", forms["131529"])
+	}
+	if forms["090000"] != archive.FormatAVI {
+		t.Errorf("an untouched recording lists as %q", forms["090000"])
+	}
+	if len(doc.Recordings) != 3 {
+		t.Errorf("listed %d recordings, wanted 3", len(doc.Recordings))
+	}
+}
+
+// The URL does not change when a recording is transcoded, so anything that
+// already points at one keeps working, and gets MP4 with ranges answered.
+func TestATranscodedRecordingIsServedAsMP4(t *testing.T) {
+	h, arch, _ := serverWithRecordings(t)
+	id := archive.ID{CameraID: "a1b2", Day: "2026-08-30", At: "131529"}
+	transcodeInPlace(t, arch, id)
+
+	for _, path := range []string{
+		"/api/recordings/a1b2/2026-08-30/131529",
+		"/api/recordings/a1b2/2026-08-30/131529.avi",
+		"/api/recordings/a1b2/2026-08-30/131529.mp4",
+	} {
+		w := get(t, h, path)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s gave %d: %s", path, w.Code, w.Body)
+		}
+		if ct := w.Header().Get("Content-Type"); ct != "video/mp4" {
+			t.Errorf("%s served as %q", path, ct)
+		}
+		if !strings.Contains(w.Header().Get("Content-Disposition"), ".mp4") {
+			t.Errorf("%s offered as %q", path, w.Header().Get("Content-Disposition"))
+		}
+	}
+
+	// An untranscoded recording is served exactly as it was.
+	w := get(t, h, "/api/recordings/a1b2/2026-08-29/090000")
+	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "video/x-msvideo" {
+		t.Errorf("an AVI is now served as %d %q", w.Code, w.Header().Get("Content-Type"))
+	}
+}
+
+// The replay routes exist because nothing decodes MJPEG in AVI. A transcoded
+// recording says so rather than answering with an index of a file it cannot
+// read.
+func TestTheReplayRoutesSayNoToATranscodedRecording(t *testing.T) {
+	h, arch, _ := serverWithRecordings(t)
+	transcodeInPlace(t, arch, archive.ID{CameraID: "a1b2", Day: "2026-08-30", At: "131529"})
+
+	for _, path := range []string{
+		"/api/recordings/a1b2/2026-08-30/131529/frames",
+		"/api/recordings/a1b2/2026-08-30/131529/stream",
+	} {
+		w := get(t, h, path)
+		if w.Code != http.StatusUnsupportedMediaType {
+			t.Errorf("%s gave %d, wanted 415", path, w.Code)
+		}
+	}
+	// And still answer for one that has not been transcoded.
+	if w := get(t, h, "/api/recordings/a1b2/2026-08-29/090000/frames"); w.Code != http.StatusOK {
+		t.Errorf("the frame index of an AVI gave %d", w.Code)
+	}
+}
+
+// Storage reports how much of the archive is transcoded, which is what says
+// whether a backfill is making progress.
+func TestStorageCountsWhatIsTranscoded(t *testing.T) {
+	h, arch, _ := serverWithRecordings(t)
+	transcodeInPlace(t, arch, archive.ID{CameraID: "a1b2", Day: "2026-08-30", At: "131529"})
+
+	w := get(t, h, "/api/storage")
+	var usage archive.Usage
+	if err := json.Unmarshal(w.Body.Bytes(), &usage); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if usage.Recordings != 3 || usage.Transcoded != 1 {
+		t.Errorf("storage says %d recordings, %d transcoded", usage.Recordings, usage.Transcoded)
 	}
 }

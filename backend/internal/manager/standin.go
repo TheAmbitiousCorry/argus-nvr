@@ -141,6 +141,10 @@ func (d *device) finish(p *archive.Pending) {
 	log.Printf("camera %s: recorded on its behalf: %s, %d frames over %.1fs, %d KB",
 		d.cam.Name, rec.At, rec.Frames, float64(rec.DurMs)/1000, rec.Bytes>>10)
 
+	// Committed, named and listable before anything re-encodes it. This is the
+	// only copy of this footage, so the order matters more here than anywhere.
+	d.offerForTranscode(rec.ID())
+
 	if removed, freed, err := d.arch.Sweep(); err != nil {
 		log.Printf("archive: retention pass failed: %v", err)
 	} else if removed > 0 {

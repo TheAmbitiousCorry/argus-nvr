@@ -3,10 +3,11 @@
 //
 // A recording is identified by the camera it came from, the day it was made
 // and the time it started, and that identity is the path it is stored at:
-// <root>/<camera id>/<day>/<start time>.avi. Nothing else is needed to say
-// whether a recording is already held, which is what makes pulling idempotent
-// after an outage that left the service and a card disagreeing about what
-// exists.
+// <root>/<camera id>/<day>/<start time>.<avi|mp4>. Nothing else is needed to
+// say whether a recording is already held, which is what makes pulling
+// idempotent after an outage that left the service and a card disagreeing about
+// what exists. The extension is the form it is held in and not part of the
+// identity, so transcoding one changes what plays it and nothing else.
 //
 // Every write lands on a temp file and is renamed into place, so an interrupted
 // download or a power cut mid-recording leaves either the whole recording or
@@ -36,6 +37,24 @@ const (
 	SourceCamera  = "camera"  // pulled from the camera's own card
 	SourceService = "service" // written here from the live stream, for a camera that could not record
 )
+
+// A recording is held in one of two forms, and its form is its extension. It
+// arrives as MJPEG in AVI, because that is what the cameras write, and it is
+// re-encoded to H.264 in MP4 once it is safely stored, because that is a
+// fraction of the size and the only one of the two a browser can play.
+//
+// The identity does not change with the form: same camera, same day, same
+// start time, a different extension. Nothing that already points at a recording
+// breaks when it is transcoded.
+const (
+	FormatAVI = "avi"
+	FormatMP4 = "mp4"
+)
+
+// formats is the order a recording is looked for in. MP4 first: while a
+// transcode is being finished both may exist for an instant, and the MP4 is the
+// one that was verified.
+var formats = []string{FormatMP4, FormatAVI}
 
 // agedFile is where a day records what retention has taken from it.
 //
@@ -126,12 +145,16 @@ type Recording struct {
 	// StartedAt carries no zone on purpose. It is the camera's own clock, and
 	// this service does not know what that clock is set to; stamping it with
 	// the server's zone would be an invention rather than a conversion.
-	StartedAt string    `json:"startedAt"`
-	DurMs     int64     `json:"durMs"`
-	Bytes     int64     `json:"bytes"`
-	Frames    int       `json:"frames,omitempty"`
-	Source    string    `json:"source"`
-	HeldAt    time.Time `json:"heldAt"`
+	StartedAt string `json:"startedAt"`
+	DurMs     int64  `json:"durMs"`
+	Bytes     int64  `json:"bytes"`
+	Frames    int    `json:"frames,omitempty"`
+	Source    string `json:"source"`
+	// Format is `avi` or `mp4`. It is what a caller reads to know whether this
+	// recording can be handed to a video element or has to be replayed frame by
+	// frame, which is the whole difference between the two.
+	Format string    `json:"format"`
+	HeldAt time.Time `json:"heldAt"`
 }
 
 // ID rebuilds the recording's identity.
@@ -151,6 +174,10 @@ type Usage struct {
 	Bytes      int64 `json:"bytes"`
 	MaxBytes   int64 `json:"maxBytes"`
 	Recordings int   `json:"recordings"`
+	// Transcoded is how many of them are H.264 in MP4 rather than the MJPEG in
+	// AVI they arrived as. It is the progress of a backfill, and the number that
+	// says how much of the archive a browser can play directly.
+	Transcoded int `json:"transcoded"`
 	// Pending is bytes belonging to writes that have not finished. They count
 	// against the limit, because the disk does not care that they are not
 	// finished, but they are never deleted to get under it.
@@ -219,9 +246,25 @@ func (s *Store) dayDir(cameraID, day string) string {
 	return filepath.Join(s.root, cameraID, day)
 }
 
-// Path is where a recording is or would be stored.
-func (s *Store) Path(id ID) string {
-	return filepath.Join(s.dayDir(id.CameraID, id.Day), id.At+".avi")
+// File is where a recording of the given form is or would be stored.
+func (s *Store) File(id ID, format string) string {
+	return filepath.Join(s.dayDir(id.CameraID, id.Day), id.At+"."+format)
+}
+
+// Locate reports which form of a recording is actually on the disk, and where.
+// A recording is looked for in both forms because a half transcoded archive is
+// the normal state of one that is being transcoded at all.
+func (s *Store) Locate(id ID) (path, format string, ok bool) {
+	if !id.valid() {
+		return "", "", false
+	}
+	for _, f := range formats {
+		p := s.File(id, f)
+		if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() {
+			return p, f, true
+		}
+	}
+	return "", "", false
 }
 
 func (s *Store) metaPath(id ID) string {
@@ -232,11 +275,8 @@ func (s *Store) metaPath(id ID) string {
 // "do not fetch it twice" rule, and it survives a restart because it asks the
 // disk rather than any memory of what was pulled.
 func (s *Store) Has(id ID) bool {
-	if !id.valid() {
-		return false
-	}
-	st, err := os.Stat(s.Path(id))
-	return err == nil && st.Mode().IsRegular()
+	_, _, ok := s.Locate(id)
+	return ok
 }
 
 // Held returns the start times a camera's day is settled about: the ones held,
@@ -253,7 +293,7 @@ func (s *Store) Held(cameraID, day string) (map[string]bool, error) {
 		return nil, err
 	}
 	for _, e := range entries {
-		if at, ok := recordingName(e); ok {
+		if at, _, ok := recordingName(e); ok {
 			held[at] = true
 		}
 	}
@@ -291,42 +331,48 @@ func (s *Store) noteAged(id ID) {
 	f.WriteString(id.At + "\n")
 }
 
-// recordingName picks the finished recordings out of a directory listing. A
-// name that is not exactly a start time and .avi is not a recording, which is
-// what keeps part files and sidecars out of every listing at once.
-func recordingName(e os.DirEntry) (string, bool) {
+// recordingName picks the finished recordings out of a directory listing, and
+// says which form each is in. A name that is not exactly a start time and one
+// of the two extensions is not a recording, which is what keeps part files and
+// sidecars out of every listing at once.
+func recordingName(e os.DirEntry) (at, format string, ok bool) {
 	if e.IsDir() {
-		return "", false
+		return "", "", false
 	}
 	name := e.Name()
-	if !strings.HasSuffix(name, ".avi") {
-		return "", false
+	for _, f := range formats {
+		if !strings.HasSuffix(name, "."+f) {
+			continue
+		}
+		at := strings.TrimSuffix(name, "."+f)
+		if !ValidAt(at) {
+			return "", "", false
+		}
+		return at, f, true
 	}
-	at := strings.TrimSuffix(name, ".avi")
-	if !ValidAt(at) {
-		return "", false
-	}
-	return at, true
+	return "", "", false
 }
 
-// Open returns the recording's file for serving. The caller closes it.
-func (s *Store) Open(id ID) (*os.File, os.FileInfo, error) {
-	if !id.valid() {
-		return nil, nil, ErrNotFound
+// Open returns the recording's file for serving, and the form it is in, which
+// is what decides the content type it goes out under. The caller closes it.
+func (s *Store) Open(id ID) (*os.File, os.FileInfo, string, error) {
+	path, format, ok := s.Locate(id)
+	if !ok {
+		return nil, nil, "", ErrNotFound
 	}
-	f, err := os.Open(s.Path(id))
+	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil, ErrNotFound
+		return nil, nil, "", ErrNotFound
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	st, err := f.Stat()
 	if err != nil {
 		f.Close()
-		return nil, nil, err
+		return nil, nil, "", err
 	}
-	return f, st, nil
+	return f, st, format, nil
 }
 
 // Save writes a recording that arrives as a ready-made AVI, which is what the
@@ -385,7 +431,7 @@ func (s *Store) Save(id ID, r io.Reader, meta Meta) (int64, error) {
 	if err := s.writeMeta(id, meta); err != nil {
 		return 0, err
 	}
-	if err := os.Rename(tmp.Name(), s.Path(id)); err != nil {
+	if err := os.Rename(tmp.Name(), s.File(id, FormatAVI)); err != nil {
 		return 0, err
 	}
 	return total, nil
@@ -468,7 +514,7 @@ func (p *Pending) Commit() (Recording, error) {
 		os.Remove(p.file.Name())
 		return Recording{}, err
 	}
-	if err := os.Rename(p.file.Name(), p.store.Path(p.id)); err != nil {
+	if err := os.Rename(p.file.Name(), p.store.File(p.id, FormatAVI)); err != nil {
 		os.Remove(p.file.Name())
 		return Recording{}, err
 	}
@@ -483,7 +529,7 @@ func (p *Pending) Commit() (Recording, error) {
 		Source:    meta.Source,
 		HeldAt:    meta.HeldAt,
 	}
-	if st, err := os.Stat(p.store.Path(p.id)); err == nil {
+	if st, err := os.Stat(p.store.File(p.id, FormatAVI)); err == nil {
 		rec.Bytes = st.Size()
 	}
 	return rec, nil
@@ -658,8 +704,12 @@ func (s *Store) scan(cameraID, day string) ([]Recording, error) {
 			if err != nil {
 				return nil, err
 			}
+			// A transcode that was interrupted between renaming the MP4 in and
+			// removing the AVI leaves both on the disk. That is one recording,
+			// in the form that was verified, rather than two.
+			seen := make(map[string]int, len(entries))
 			for _, e := range entries {
-				at, ok := recordingName(e)
+				at, format, ok := recordingName(e)
 				if !ok {
 					continue
 				}
@@ -669,7 +719,7 @@ func (s *Store) scan(cameraID, day string) ([]Recording, error) {
 				}
 				id := ID{CameraID: cam, Day: d, At: at}
 				meta := s.readMeta(id)
-				out = append(out, Recording{
+				rec := Recording{
 					CameraID:  cam,
 					Day:       d,
 					At:        at,
@@ -678,8 +728,17 @@ func (s *Store) scan(cameraID, day string) ([]Recording, error) {
 					Bytes:     info.Size(),
 					Frames:    meta.Frames,
 					Source:    meta.Source,
+					Format:    format,
 					HeldAt:    meta.HeldAt,
-				})
+				}
+				if i, dup := seen[at]; dup {
+					if format == FormatMP4 {
+						out[i] = rec
+					}
+					continue
+				}
+				seen[at] = len(out)
+				out = append(out, rec)
 			}
 		}
 	}
@@ -728,7 +787,10 @@ func (s *Store) Usage() (Usage, error) {
 		switch {
 		case strings.HasPrefix(d.Name(), tempPrefix):
 			u.Pending += info.Size()
-		case strings.HasSuffix(d.Name(), ".avi"):
+		case strings.HasSuffix(d.Name(), "."+FormatMP4):
+			u.Recordings++
+			u.Transcoded++
+		case strings.HasSuffix(d.Name(), "."+FormatAVI):
 			u.Recordings++
 		}
 		return nil
@@ -776,7 +838,7 @@ func (s *Store) Sweep() (removed int, freed int64, err error) {
 	for i := len(recs) - 1; i > 0 && usage.Bytes > s.maxBytes; i-- {
 		r := recs[i]
 		id := r.ID()
-		if err := os.Remove(s.Path(id)); err != nil {
+		if err := os.Remove(s.File(id, r.Format)); err != nil {
 			continue
 		}
 		freed += r.Bytes

@@ -171,15 +171,21 @@ export const api = {
   recordingFrames: (cameraId: string, day: string, at: string, signal?: AbortSignal) =>
     request<RecordingFrames>(`${recordingPath(cameraId, day, at)}/frames`, { signal }),
 
-  /** The AVI itself, for download. Ranges are answered, so a player can seek in it. */
+  /**
+   * The recording itself, in whichever form the service holds it: the AVI it
+   * arrived as, or the MP4 it was transcoded to. One URL for both, because the
+   * form is not part of a recording's identity. Ranges are answered, so a
+   * <video> pointed at this seeks properly rather than refetching the file.
+   */
   recordingUrl: (cameraId: string, day: string, at: string) =>
     BASE + recordingPath(cameraId, day, at),
 
   /**
    * The same recording replayed as multipart/x-mixed-replace, which an <img>
-   * plays with no decoding in the page. This is the only way to watch one here:
-   * they are MJPEG inside AVI, which no browser decodes, so a <video> pointed
-   * at the download URL shows nothing at all.
+   * plays with no decoding in the page. This is the only way to watch one that
+   * is still MJPEG inside AVI, which no browser decodes, so a <video> pointed
+   * at the download URL shows nothing at all. A transcoded recording needs none
+   * of this and the service answers 415 here for one.
    *
    * `from` is a frame number, so seeking does not replay from the beginning.
    * `speed` is 0.5, 1, 2 or 4; 0 sends frames as fast as they can be read.
@@ -195,13 +201,24 @@ export const api = {
     query({ from: opts.from, speed: opts.speed, t: opts.nonce }),
 }
 
+/** Which form a recording is held in, defaulting to what they all used to be. */
+export function recordingFormat(rec: Recording): 'avi' | 'mp4' {
+  return rec.format === 'mp4' ? 'mp4' : 'avi'
+}
+
+/** True when the browser can decode this recording itself. */
+export function playsInVideoElement(rec: Recording): boolean {
+  return recordingFormat(rec) === 'mp4'
+}
+
 /**
  * What to call a downloaded recording. Without this the browser names the file
- * after the URL's last segment, which is six digits and no camera.
+ * after the URL's last segment, which is six digits and no camera, and gives it
+ * the wrong extension for what the service actually sends.
  */
 export function recordingFileName(rec: Recording, cameraName?: string): string {
   const who = (cameraName ?? rec.cameraId).replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '')
-  return `${who || rec.cameraId}-${rec.day}-${rec.at}.avi`
+  return `${who || rec.cameraId}-${rec.day}-${rec.at}.${recordingFormat(rec)}`
 }
 
 /**

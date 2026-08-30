@@ -50,13 +50,18 @@ func (r *replay) close() {
 	}
 }
 
-// recordingID reads the identity out of the path, accepting the trailing .avi
-// the download route accepts so one URL can gain a suffix and keep working.
+// recordingID reads the identity out of the path, accepting either extension
+// so a URL can gain a suffix and keep working, and so a link written down while
+// a recording was an AVI still finds it after it has been transcoded.
 func recordingID(r *http.Request) archive.ID {
+	at := r.PathValue("at")
+	for _, format := range []string{archive.FormatAVI, archive.FormatMP4} {
+		at = strings.TrimSuffix(at, "."+format)
+	}
 	return archive.ID{
 		CameraID: r.PathValue("cameraId"),
 		Day:      r.PathValue("day"),
-		At:       strings.TrimSuffix(r.PathValue("at"), ".avi"),
+		At:       at,
 	}
 }
 
@@ -69,13 +74,23 @@ func (s *Server) openReplay(w http.ResponseWriter, r *http.Request) (*replay, bo
 	}
 	id := recordingID(r)
 
-	f, info, err := s.archive.Open(id)
+	f, info, format, err := s.archive.Open(id)
 	if errors.Is(err, archive.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "no such recording")
 		return nil, false
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return nil, false
+	}
+	// A transcoded recording has no business here. These two routes exist only
+	// because nothing decodes MJPEG in AVI in a browser, and an MP4 is played
+	// by a video element from the download URL, with seeking the browser
+	// provides rather than a scrubber built out of frame times.
+	if format != archive.FormatAVI {
+		f.Close()
+		writeError(w, http.StatusUnsupportedMediaType,
+			"this recording is held as MP4: play it from the recording URL with a video element")
 		return nil, false
 	}
 
@@ -114,9 +129,11 @@ func (s *Server) recordingFrames(w http.ResponseWriter, r *http.Request) {
 		durMs = rep.idx.DurMs
 	}
 
-	// A recording never changes once it is held, so its index is worth caching
-	// as hard as the recording itself.
-	w.Header().Set("Cache-Control", "private, max-age=86400")
+	// Revalidated for the same reason the recording itself is: a recording that
+	// has been transcoded since this index was cached has no frame index at
+	// all, and a client holding one would replay a recording the service will
+	// no longer replay.
+	w.Header().Set("Cache-Control", "private, no-cache")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"frames": len(rep.idx.Frames),
 		"durMs":  durMs,

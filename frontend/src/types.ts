@@ -222,6 +222,17 @@ export interface Recording {
    * not write it.
    */
   source: 'camera' | 'service'
+  /**
+   * Which form the recording is held in. `mp4` is H.264, which the browser
+   * decodes itself, so it plays in a <video> with real seeking. `avi` is the
+   * MJPEG the camera wrote, which nothing decodes natively and which has to be
+   * replayed frame by frame.
+   *
+   * Optional, because a backend from before transcoding existed does not send
+   * it, and a recording with no form named is read as the AVI it would have
+   * been then.
+   */
+  format?: 'avi' | 'mp4'
   /** This service's clock, which does carry a zone. */
   heldAt: string
 }

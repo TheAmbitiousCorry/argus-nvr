@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { api, recordingFileName } from '@/api/client'
+import { ApiError, api, playsInVideoElement, recordingFileName, recordingFormat } from '@/api/client'
 import { clockOf, formatBytes, formatDuration } from '@/composables/useRecordings'
 import type { Recording, RecordingFrames } from '@/types'
 
@@ -8,11 +8,21 @@ const props = defineProps<{ recording: Recording; cameraName?: string }>()
 const emit = defineEmits<{ close: [] }>()
 
 /**
- * These recordings are MJPEG inside AVI, which no browser decodes: a <video>
- * pointed at the download URL shows nothing at all. The service replays one as
- * multipart/x-mixed-replace instead, which an ordinary <img> plays with no
- * decoding in the page, the same way the live wall works and the same way the
- * camera's own playback page has always done it.
+ * There are two players here, because there are two forms a recording is held
+ * in and they have nothing in common.
+ *
+ * A transcoded recording is H.264 in MP4, which the browser decodes itself. It
+ * gets a <video> pointed at the recording URL and everything below is left
+ * alone: play, pause, seeking, buffering and a timeline, all of it the
+ * browser's, all of it better than anything reconstructed from frame times.
+ *
+ * A recording that has not been transcoded is MJPEG inside AVI, which no
+ * browser decodes: a <video> pointed at the download URL shows nothing at all.
+ * The service replays one as multipart/x-mixed-replace instead, which an
+ * ordinary <img> plays with no decoding in the page, the same way the live wall
+ * works and the same way the camera's own playback page has always done it.
+ * That is everything from here down, and it is unchanged: a half transcoded
+ * archive must not be a half broken one.
  *
  * That leaves two things an <img> cannot do by itself, and this is how each is
  * covered:
@@ -59,6 +69,18 @@ const frameCount = computed(
 const lastFrame = computed(() => Math.max(0, frameCount.value - 1))
 const durationMs = computed(() => index.value?.durMs ?? props.recording.durMs)
 
+/**
+ * Whether the browser can play this one itself.
+ *
+ * `transcodedSince` is for the recording that was transcoded while this listing
+ * was on screen. The service answers 415 for a replay of an MP4, and the right
+ * thing to do with that answer is to play the recording rather than report it:
+ * a half transcoded archive must not be a half broken one, and the page a
+ * moment out of date is the normal state of a page.
+ */
+const transcodedSince = ref(false)
+const asVideo = computed(() => playsInVideoElement(props.recording) || transcodedSince.value)
+
 const title = computed(
   () => `${props.cameraName ?? props.recording.cameraId} - ${props.recording.day} ${clockOf(props.recording.at)}`,
 )
@@ -66,6 +88,7 @@ const downloadUrl = computed(() =>
   api.recordingUrl(props.recording.cameraId, props.recording.day, props.recording.at),
 )
 const downloadName = computed(() => recordingFileName(props.recording, props.cameraName))
+const downloadLabel = computed(() => `Download ${recordingFormat(props.recording).toUpperCase()}`)
 
 /** Where a frame falls. Without an index, spread them evenly and say so. */
 function timeAt(n: number): number {
@@ -215,8 +238,12 @@ async function loadIndex() {
     if (run !== indexRun) return
     index.value = res?.times ? res : null
     if (!index.value) indexError.value = 'No frame index, so there is nothing to scrub along.'
-  } catch {
+  } catch (err) {
     if (run !== indexRun) return
+    if (err instanceof ApiError && err.status === 415) {
+      transcodedSince.value = true
+      return
+    }
     indexError.value =
       'No frame index for this recording, so it plays from the start and cannot be scrubbed.'
   }
@@ -231,7 +258,13 @@ watch(
     frozen.value = false
     frame.value = 0
     streamError.value = null
+    indexError.value = null
+    transcodedSince.value = false
     imgSrc.value = BLANK
+    // A transcoded recording needs none of this. Asking for its frame index
+    // would be one request to be answered with a 415, and opening a replay of
+    // it is not a thing the service will do.
+    if (asVideo.value) return
     void loadIndex().then(() => preview(0))
   },
   { immediate: true },
@@ -263,7 +296,20 @@ onBeforeUnmount(() => {
       <button type="button" class="ghost" @click="emit('close')">Close</button>
     </header>
 
-    <div class="screen">
+    <!-- H.264: the browser decodes it, so the browser plays it. -->
+    <div v-if="asVideo" class="screen">
+      <video
+        class="feed"
+        data-testid="recording-video"
+        controls
+        playsinline
+        preload="metadata"
+        :src="downloadUrl"
+      ></video>
+    </div>
+
+    <!-- MJPEG in AVI: nothing decodes it, so it is replayed frame by frame. -->
+    <div v-else class="screen">
       <img
         ref="imgEl"
         class="feed"
@@ -278,6 +324,7 @@ onBeforeUnmount(() => {
     </div>
 
     <input
+      v-if="!asVideo"
       class="scrub"
       type="range"
       min="0"
@@ -290,22 +337,25 @@ onBeforeUnmount(() => {
     />
 
     <div class="controls">
-      <button type="button" class="primary" @click="toggle">
-        {{ playing ? 'Pause' : 'Play' }}
-      </button>
-      <span class="pos">{{ position }}</span>
+      <template v-if="!asVideo">
+        <button type="button" class="primary" @click="toggle">
+          {{ playing ? 'Pause' : 'Play' }}
+        </button>
+        <span class="pos">{{ position }}</span>
 
-      <label class="speed">
-        Speed
-        <select v-model.number="speed">
-          <option v-for="choice in SPEEDS" :key="choice" :value="choice">{{ choice }}x</option>
-        </select>
-      </label>
+        <label class="speed">
+          Speed
+          <select v-model.number="speed">
+            <option v-for="choice in SPEEDS" :key="choice" :value="choice">{{ choice }}x</option>
+          </select>
+        </label>
+      </template>
+      <span v-else class="pos">{{ (durationMs / 1000).toFixed(1) }}s, H.264</span>
 
-      <a class="ghost download" :href="downloadUrl" :download="downloadName">Download AVI</a>
+      <a class="ghost download" :href="downloadUrl" :download="downloadName">{{ downloadLabel }}</a>
     </div>
 
-    <p v-if="indexError" class="note warn">{{ indexError }}</p>
+    <p v-if="indexError && !asVideo" class="note warn">{{ indexError }}</p>
   </div>
 </template>
 

@@ -1,7 +1,7 @@
 # ESP32-CAM firmware API
 
 The cameras this NVR talks to. Firmware source is the sibling repository
-`esp32-cam-fw`. One camera is live on the development network at
+Argus Cam. One camera is live on the development network at
 `192.168.10.208`, named `camera-alpha`.
 
 ## Authentication

@@ -56,7 +56,7 @@ func startCamera(t *testing.T, cam *versionCamera) (*Manager, store.Camera) {
 		User:    "admin",
 		Pass:    "secret",
 	}
-	m := New(nil)
+	m := New(nil, nil)
 	m.Sync([]store.Camera{c})
 	t.Cleanup(m.Close)
 	return m, c

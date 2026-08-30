@@ -1,7 +1,7 @@
 # Roadmap
 
 Argus NVR: watches several ESP32-CAM cameras running the firmware in
-[esp32-cam-fw](https://github.com/TheAmbitiousCorry/esp32-cam-fw).
+[Argus Cam](https://github.com/TheAmbitiousCorry/argus-cam).
 
 Items describe the situation someone is in, not the feature that would fix it,
 so the shape stays open until it is worked on. Appetite is how much time the

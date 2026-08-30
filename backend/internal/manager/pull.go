@@ -204,7 +204,20 @@ func (d *device) download(ctx context.Context, day string, r camera.Recording) e
 		return err
 	}
 	log.Printf("camera %s: held %s/%s, %d KB", d.cam.Name, day, r.At, bytes>>10)
+	// The recording is on the disk under its real name before anything is said
+	// about re-encoding it. A transcode that fails from here costs a larger
+	// file; one started any earlier could cost the recording.
+	d.offerForTranscode(id)
 	return nil
+}
+
+// offerForTranscode hands a stored recording to the encoder, if there is one.
+// It never blocks and never fails: a recording that does not make it into the
+// queue is found again by the backfill.
+func (d *device) offerForTranscode(id archive.ID) {
+	if d.transcode != nil {
+		d.transcode.Add(id)
+	}
 }
 
 // setFetching tells the poller to stand aside, and to start again afterwards.

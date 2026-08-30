@@ -19,6 +19,7 @@ import (
 	"argus-nvr/internal/httpapi"
 	"argus-nvr/internal/manager"
 	"argus-nvr/internal/store"
+	"argus-nvr/internal/transcode"
 )
 
 // addressCheckEvery is how often stored addresses are checked against what
@@ -41,6 +42,10 @@ func main() {
 	staticDir := flag.String("static", "./web", "directory of built frontend files, empty to disable")
 	recDir := flag.String("recordings", "./data/recordings", "directory recordings are held in, empty to hold none")
 	maxBytes := flag.Int64("recordings-max-bytes", defaultArchiveMax, "size the recordings are aged down to, 0 for no limit")
+	transcoding := flag.Bool("transcode", true, "re-encode stored recordings to H.264 in MP4, when ffmpeg is available")
+	crf := flag.Int("transcode-crf", transcode.DefaultCRF, "H.264 quality: lower is better and larger, 0 to 51")
+	ffmpegBin := flag.String("ffmpeg", "ffmpeg", "ffmpeg binary, by name on PATH or by path")
+	backfillGap := flag.Duration("transcode-backfill-gap", transcode.DefaultBackfillGap, "pause between transcoding recordings already held")
 	flag.Parse()
 
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
@@ -75,7 +80,21 @@ func main() {
 		go sweepArchive(ctx, arch)
 	}
 
-	mgr := manager.New(arch)
+	// Transcoding turns what is held into a fraction of its size, and into
+	// something a browser can play without the frame-by-frame replay. It is
+	// deliberately optional: a machine with no ffmpeg holds larger recordings,
+	// which is a far better trade than a service that will not start.
+	var trans manager.Transcoder
+	if arch != nil && *transcoding {
+		// A nil queue must stay a nil interface: a typed nil inside one is not
+		// nil, and everything downstream tests for nil to mean "hold what
+		// arrives".
+		if q := startTranscoding(ctx, arch, *ffmpegBin, *crf, *backfillGap); q != nil {
+			trans = q
+		}
+	}
+
+	mgr := manager.New(arch, trans)
 	mgr.Sync(st.List())
 
 	disc := discovery.New()
@@ -132,6 +151,25 @@ func main() {
 		srv.Close()
 	}
 	log.Print("stopped")
+}
+
+// startTranscoding wires the encoder to the archive, or says once why it did
+// not. Everything downstream of this treats a nil queue as "hold what arrives",
+// so a missing ffmpeg changes nothing else about how the service runs.
+func startTranscoding(ctx context.Context, arch *archive.Store, bin string, crf int, gap time.Duration) *transcode.Queue {
+	enc, err := transcode.Find(bin, crf)
+	if err != nil {
+		// Once, at startup, and never again. A missing binary is a fact about
+		// this machine, not an event that recurs.
+		log.Printf("recordings: %v", err)
+		return nil
+	}
+	q := transcode.New(arch, enc)
+	go q.Run(ctx)
+	go q.Backfill(ctx, gap)
+	log.Printf("transcoding recordings with %s at crf %d, and working through what is already held every %s",
+		enc.Bin(), enc.CRF(), gap)
+	return q
 }
 
 // sweepArchive ages the archive down to its limit on a slow timer. Retention is
