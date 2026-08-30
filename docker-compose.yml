@@ -1,0 +1,11 @@
+services:
+  nvr:
+    build: .
+    # Host networking, because mDNS discovery needs multicast on the LAN and a
+    # bridge network does not carry it. This is why the port is not published.
+    network_mode: host
+    volumes:
+      - ./data:/data
+    environment:
+      - NVR_ADDR=:8080
+    restart: unless-stopped
