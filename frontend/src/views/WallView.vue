@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import CameraTile from '@/components/CameraTile.vue'
 import ErrorBanner from '@/components/ErrorBanner.vue'
-import { useCameraStore } from '@/composables/useCameraStore'
+import { useCameraStore, isOnline } from '@/composables/useCameraStore'
 import { usePageVisible } from '@/composables/usePageVisible'
 import { MAX_CONCURRENT_STREAMS, queuedCount, streamingCount } from '@/composables/useStreamSlot'
 
@@ -12,7 +12,7 @@ const pageVisible = usePageVisible()
 
 const expandedId = ref<string | null>(null)
 
-const online = computed(() => cameras.value.filter((c) => c.online).length)
+const online = computed(() => cameras.value.filter(isOnline).length)
 const recording = computed(
   () => cameras.value.filter((c) => statuses.value[c.id]?.active).length,
 )

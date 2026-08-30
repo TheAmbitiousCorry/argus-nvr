@@ -6,7 +6,7 @@ import StateDot from '@/components/StateDot.vue'
 import MotionReading from '@/components/MotionReading.vue'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 import { ApiError } from '@/api/client'
-import { cameraState, useCameraStore } from '@/composables/useCameraStore'
+import { cameraState, useCameraStore, isOnline } from '@/composables/useCameraStore'
 import { usePageVisible } from '@/composables/usePageVisible'
 import type { CameraStatus } from '@/types'
 
@@ -18,6 +18,7 @@ const { cameraById, statuses, statusErrors, listError, loaded, removeCamera } = 
 const id = computed(() => String(route.params.id))
 const camera = computed(() => cameraById.value.get(id.value))
 const status = computed<CameraStatus | undefined>(() => statuses.value[id.value])
+const online = computed(() => (camera.value ? isOnline(camera.value) : false))
 const statusError = computed(() => statusErrors.value[id.value])
 const state = computed(() => (camera.value ? cameraState(camera.value, status.value) : 'offline'))
 
@@ -80,7 +81,7 @@ async function remove() {
         <CameraStream
           :camera-id="camera.id"
           :name="camera.name"
-          :online="camera.online"
+          :online="online"
           :active="pageVisible"
           fit="contain"
         />
@@ -94,7 +95,7 @@ async function remove() {
           </p>
 
           <ErrorBanner v-if="statusError" :message="statusError" />
-          <p v-else-if="!camera.online" class="notice">Camera is offline.</p>
+          <p v-else-if="!online" class="notice">Camera is offline.</p>
           <p v-else-if="rows.length === 0" class="notice">Waiting for the first status poll...</p>
 
           <dl v-else class="rows">

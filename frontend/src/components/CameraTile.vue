@@ -5,7 +5,7 @@ import CameraStream from './CameraStream.vue'
 import StateDot from './StateDot.vue'
 import MotionReading from './MotionReading.vue'
 import { useIntersection } from '@/composables/useIntersection'
-import { cameraState } from '@/composables/useCameraStore'
+import { cameraState, isOnline } from '@/composables/useCameraStore'
 import type { Camera, CameraStatus } from '@/types'
 
 const props = defineProps<{
@@ -24,6 +24,7 @@ const root = ref<HTMLElement | null>(null)
 const onScreen = useIntersection(root)
 
 const state = computed(() => cameraState(props.camera, props.status))
+const online = computed(() => isOnline(props.camera))
 const active = computed(
   () => props.allowStream && props.pageVisible && (props.expanded || onScreen.value),
 )
@@ -46,7 +47,7 @@ function onKey(event: KeyboardEvent) {
   <article
     ref="root"
     class="tile"
-    :class="{ expanded, offline: !camera.online }"
+    :class="{ expanded, offline: !online }"
     role="button"
     tabindex="0"
     :aria-pressed="expanded"
@@ -58,7 +59,7 @@ function onKey(event: KeyboardEvent) {
       <CameraStream
         :camera-id="camera.id"
         :name="camera.name"
-        :online="camera.online"
+        :online="online"
         :active="active"
         :fit="expanded ? 'contain' : 'cover'"
       />

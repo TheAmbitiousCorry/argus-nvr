@@ -2,10 +2,17 @@ import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import { ApiError, api } from '@/api/client'
 import type { Camera, CameraState, CameraStatus, NewCamera } from '@/types'
 
+/**
+ * Whether the backend reached this camera the last time it asked. It lives
+ * inside the status envelope rather than on the camera, because it describes
+ * the last attempt rather than the camera itself.
+ */
+export function isOnline(camera: Camera): boolean {
+  return camera.status?.online === true
+}
+
 /** The firmware asks for a couple of seconds between polls. Take it literally. */
 export const STATUS_POLL_MS = 2000
-/** The camera list changes when someone adds or removes one, so it is lazier. */
-export const LIST_REFRESH_EVERY = 5
 
 const cameras = shallowRef<Camera[]>([])
 const statuses = ref<Record<string, CameraStatus>>({})
@@ -28,6 +35,16 @@ async function refreshList(): Promise<void> {
     const list = await api.listCameras()
     cameras.value = Array.isArray(list) ? list : []
     listError.value = null
+    // The list already carries each camera's status, so reading it here is what
+    // every tile needs and costs nothing extra.
+    const next: Record<string, CameraStatus> = {}
+    const errors: Record<string, string> = {}
+    for (const cam of cameras.value) {
+      if (cam.status?.record) next[cam.id] = cam.status.record
+      else if (cam.status?.error) errors[cam.id] = cam.status.error
+    }
+    statuses.value = next
+    statusErrors.value = errors
     // Forget state belonging to cameras that have gone away.
     const live = new Set(cameras.value.map((c) => c.id))
     for (const id of Object.keys(statuses.value)) if (!live.has(id)) delete statuses.value[id]
@@ -40,40 +57,12 @@ async function refreshList(): Promise<void> {
   }
 }
 
-/**
- * One pass over every online camera, run from a single timer for the whole app.
- * Tiles never poll for themselves.
- */
-async function refreshStatuses(): Promise<void> {
-  const targets = cameras.value.filter((c) => c.online)
-  const offline = cameras.value.filter((c) => !c.online)
-  for (const cam of offline) {
-    delete statuses.value[cam.id]
-    delete statusErrors.value[cam.id]
-  }
-  if (targets.length === 0) return
-
-  const results = await Promise.allSettled(targets.map((c) => api.cameraStatus(c.id)))
-  results.forEach((result, i) => {
-    const id = targets[i]!.id
-    if (result.status === 'fulfilled' && result.value) {
-      statuses.value[id] = result.value
-      delete statusErrors.value[id]
-    } else {
-      const reason = result.status === 'rejected' ? result.reason : undefined
-      statusErrors.value[id] = reason instanceof ApiError ? reason.message : 'Status unavailable'
-      delete statuses.value[id]
-    }
-  })
-}
-
 async function tick(force = false): Promise<void> {
   if (inFlight) return
   if (!force && !pageVisible()) return
   inFlight = true
   try {
-    if (ticks % LIST_REFRESH_EVERY === 0) await refreshList()
-    await refreshStatuses()
+    await refreshList()
     ticks += 1
   } finally {
     inFlight = false
@@ -101,7 +90,7 @@ function stop() {
 }
 
 export function cameraState(camera: Camera, status?: CameraStatus): CameraState {
-  if (!camera.online) return 'offline'
+  if (!isOnline(camera)) return 'offline'
   return status?.active ? 'recording' : 'watching'
 }
 
