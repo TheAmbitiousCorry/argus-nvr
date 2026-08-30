@@ -261,6 +261,12 @@ defineExpose({ retryNow })
   object-fit: contain;
 }
 
+/*
+ * A tile with no picture still says which camera it is, so it shows that
+ * camera's own eye behind whatever went wrong. Faint enough to read text over,
+ * present enough that a wall of connecting tiles looks deliberate rather than
+ * broken.
+ */
 .placeholder {
   position: absolute;
   inset: 0;
@@ -272,18 +278,24 @@ defineExpose({ retryNow })
   padding: 1rem;
   text-align: center;
   color: #8a8a8a;
-  background: repeating-linear-gradient(
-    45deg,
-    #101010,
-    #101010 10px,
-    #141414 10px,
-    #141414 20px
-  );
+  background:
+    url("data:image/svg+xml,%3Csvg%20stroke-opacity%3D%270.07%27%20fill-opacity%3D%270.07%27%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%20100%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff%22%20stroke-width%3D%224.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M32%203v7M18%207l4%207M46%207l-4%207M7%2015l5%206M57%2015l-5%206M2%2027h7M62%2027h-7%22%2F%3E%3Cpath%20d%3D%22M6%2030c8-11%2016-16%2026-16s18%205%2026%2016c-8%2011-16%2016-26%2016S14%2041%206%2030z%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2230%22%20r%3D%229%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2230%22%20r%3D%223%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M32%2046c0%207-7%2010-7%2017s9%209%209%2016%22%2F%3E%3Cpath%20d%3D%22M34%2079c6%200%2010%204%2010%209s-4%209-10%209-11-4-11-9%204-7%208-7%206%202%206%205-2%204-4%204%22%2F%3E%3C%2Fsvg%3E") center 38% / auto 72% no-repeat,
+    repeating-linear-gradient(45deg, #101010, #101010 10px, #141414 10px, #141414 20px);
 }
 
-.placeholder.queued,
-.placeholder.connecting {
-  background: rgba(11, 11, 11, 0.55);
+/* The eye blinks slowly while a connection is being made, and holds still once
+   there is nothing left to wait for. */
+.placeholder.connecting,
+.placeholder.queued {
+  background:
+    url("data:image/svg+xml,%3Csvg%20stroke-opacity%3D%270.07%27%20fill-opacity%3D%270.07%27%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%20100%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff%22%20stroke-width%3D%224.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M32%203v7M18%207l4%207M46%207l-4%207M7%2015l5%206M57%2015l-5%206M2%2027h7M62%2027h-7%22%2F%3E%3Cpath%20d%3D%22M6%2030c8-11%2016-16%2026-16s18%205%2026%2016c-8%2011-16%2016-26%2016S14%2041%206%2030z%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2230%22%20r%3D%229%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2230%22%20r%3D%223%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M32%2046c0%207-7%2010-7%2017s9%209%209%2016%22%2F%3E%3Cpath%20d%3D%22M34%2079c6%200%2010%204%2010%209s-4%209-10%209-11-4-11-9%204-7%208-7%206%202%206%205-2%204-4%204%22%2F%3E%3C%2Fsvg%3E") center 38% / auto 72% no-repeat,
+    rgba(11, 11, 11, 0.55);
+  animation: blink 2.6s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 46%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 
 .badge {

@@ -19,7 +19,16 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: var(--bg);
+  /*
+   * Argus behind the page, painted as a second layer on the body's own
+   * background rather than a pseudo-element: a ::before at a negative z-index
+   * sits behind the background colour and is never seen. Fixed so it reads as
+   * the surface the app sits on rather than as content, and faint enough that
+   * nothing on top of it loses contrast.
+   */
+  background:
+    url("data:image/svg+xml,%3Csvg%20stroke-opacity%3D%270.05%27%20fill-opacity%3D%270.05%27%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20120%20108%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff%22%20stroke-width%3D%224%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cg%3E%3Cpath%20d%3D%22M60%206v5M50%209l3%205M70%209l-3%205%22%2F%3E%3Cpath%20d%3D%22M46%2022c4-6%208-9%2014-9s10%203%2014%209c-4%206-8%209-14%209s-10-3-14-9z%22%2F%3E%3Ccircle%20cx%3D%2260%22%20cy%3D%2222%22%20r%3D%225%22%2F%3E%3Ccircle%20cx%3D%2260%22%20cy%3D%2222%22%20r%3D%221.8%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M60%2031c0%2012-5%2016-5%2028s5%2014%205%2022%22%2F%3E%3C%2Fg%3E%3Cg%3E%3Cpath%20d%3D%22M24%2024v4M15%2027l3%204M33%2027l-3%204%22%2F%3E%3Cpath%20d%3D%22M11%2038c4-5%207-8%2013-8s9%203%2013%208c-4%205-7%208-13%208s-9-3-13-8z%22%2F%3E%3Ccircle%20cx%3D%2224%22%20cy%3D%2238%22%20r%3D%224.5%22%2F%3E%3Ccircle%20cx%3D%2224%22%20cy%3D%2238%22%20r%3D%221.6%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M24%2046c0%2012%206%2015%2010%2024s2%2014%208%2018%22%2F%3E%3C%2Fg%3E%3Cg%3E%3Cpath%20d%3D%22M96%2024v4M87%2027l3%204M105%2027l-3%204%22%2F%3E%3Cpath%20d%3D%22M83%2038c4-5%207-8%2013-8s9%203%2013%208c-4%205-7%208-13%208s-9-3-13-8z%22%2F%3E%3Ccircle%20cx%3D%2296%22%20cy%3D%2238%22%20r%3D%224.5%22%2F%3E%3Ccircle%20cx%3D%2296%22%20cy%3D%2238%22%20r%3D%221.6%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M96%2046c0%2012-6%2015-10%2024s-2%2014-8%2018%22%2F%3E%3C%2Fg%3E%3Cg%3E%3Cpath%20d%3D%22M9%2054v4M2%2058l3%203%22%2F%3E%3Cpath%20d%3D%22M0%2066c3-4%205-6%2010-6s7%202%2010%206c-3%204-5%206-10%206s-7-2-10-6z%22%2F%3E%3Ccircle%20cx%3D%2210%22%20cy%3D%2266%22%20r%3D%223.6%22%2F%3E%3Ccircle%20cx%3D%2210%22%20cy%3D%2266%22%20r%3D%221.3%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M12%2073c4%208%2012%209%2018%2014s4%2010%208%2013%22%2F%3E%3C%2Fg%3E%3Cg%3E%3Cpath%20d%3D%22M111%2054v4M118%2058l-3%203%22%2F%3E%3Cpath%20d%3D%22M120%2066c-3-4-5-6-10-6s-7%202-10%206c3%204%205%206%2010%206s7-2%2010-6z%22%2F%3E%3Ccircle%20cx%3D%22110%22%20cy%3D%2266%22%20r%3D%223.6%22%2F%3E%3Ccircle%20cx%3D%22110%22%20cy%3D%2266%22%20r%3D%221.3%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M108%2073c-4%208-12%209-18%2014s-4%2010-8%2013%22%2F%3E%3C%2Fg%3E%3Cpath%20d%3D%22M60%2079c14%200%2024%206%2024%2014s-10%2014-24%2014-24-6-24-14%209-11%2018-11%2014%204%2014%209-4%206-8%206-6-2-6-4%22%2F%3E%3C%2Fsvg%3E") center 58% / min(54vh, 48vw) no-repeat fixed,
+    var(--bg);
   color: var(--text);
   font-family:
     system-ui,
