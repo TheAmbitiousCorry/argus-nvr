@@ -9,6 +9,16 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/AddCameraView.vue'),
   },
   {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('@/views/SettingsView.vue'),
+  },
+  {
+    path: '/firmware',
+    name: 'firmware',
+    component: () => import('@/views/FirmwareView.vue'),
+  },
+  {
     path: '/camera/:id',
     name: 'camera',
     component: () => import('@/views/CameraDetailView.vue'),

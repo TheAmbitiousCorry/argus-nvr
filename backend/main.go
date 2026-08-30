@@ -1,4 +1,4 @@
-// Command esp32cam-nvr aggregates several ESP32-CAM cameras behind one HTTP
+// Command argus-nvr aggregates several ESP32-CAM cameras behind one HTTP
 // service: it holds their sessions, proxies their video, and polls their state
 // so browsers never talk to the microcontrollers directly.
 package main
@@ -14,11 +14,15 @@ import (
 	"syscall"
 	"time"
 
-	"esp32cam-nvr/internal/discovery"
-	"esp32cam-nvr/internal/httpapi"
-	"esp32cam-nvr/internal/manager"
-	"esp32cam-nvr/internal/store"
+	"argus-nvr/internal/discovery"
+	"argus-nvr/internal/httpapi"
+	"argus-nvr/internal/manager"
+	"argus-nvr/internal/store"
 )
+
+// addressCheckEvery is how often stored addresses are checked against what
+// discovery can see. Cameras move rarely, so this is slow on purpose.
+const addressCheckEvery = 30 * time.Second
 
 func main() {
 	addr := flag.String("addr", ":8080", "address to listen on")
@@ -47,6 +51,11 @@ func main() {
 	// Discovery runs entirely in the background. It must never delay serving,
 	// and on a machine with no network it simply finds nothing.
 	go disc.Run(ctx)
+
+	// A camera added under its .local name is unreachable from inside the
+	// container, which has no mDNS resolver, so stored addresses are kept
+	// pointed at the IP discovery reports for them.
+	go manager.WatchAddresses(ctx, st, mgr, disc, addressCheckEvery)
 
 	api := httpapi.New(st, mgr, disc, *staticDir)
 

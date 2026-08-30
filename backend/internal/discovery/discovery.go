@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -145,6 +146,52 @@ func (d *Discoverer) Unconfigured(known []string) []Host {
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// ResolveAddress rewrites an address so that it points at the IP discovery saw,
+// keeping any port. A literal IP is returned untouched, so a camera added by
+// address is never second-guessed, and an address no browse has matched is left
+// alone rather than guessed at. The second return value reports whether the
+// address changed.
+func (d *Discoverer) ResolveAddress(addr string) (string, bool) {
+	host, port := addr, ""
+	if h, p, err := net.SplitHostPort(addr); err == nil {
+		host, port = h, p
+	}
+	if host == "" || net.ParseIP(host) != nil {
+		return addr, false
+	}
+	ip, ok := d.resolve(host)
+	if !ok || ip == host {
+		return addr, false
+	}
+	if port != "" {
+		return net.JoinHostPort(ip, port), true
+	}
+	return ip, true
+}
+
+// resolve returns the IPv4 address discovery saw for a host, given either its
+// mDNS hostname (camera-alpha.local), its instance name (camera-alpha), or the
+// IP itself. The container this service runs in has no mDNS resolver, so a name
+// that the network answers for is still a name Go cannot look up; the browse
+// results are the only place that translation exists.
+func (d *Discoverer) resolve(name string) (string, bool) {
+	want := normalise(name)
+	if want == "" {
+		return "", false
+	}
+
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	for _, h := range d.hosts {
+		for _, candidate := range []string{h.IP, h.Host, h.Name, h.Name + "." + trimDot(domain)} {
+			if strings.EqualFold(normalise(candidate), want) {
+				return h.IP, true
+			}
+		}
+	}
+	return "", false
 }
 
 func (d *Discoverer) expire() {

@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"esp32cam-nvr/internal/camera"
-	"esp32cam-nvr/internal/store"
+	"argus-nvr/internal/camera"
+	"argus-nvr/internal/store"
 )
 
 // pollInterval is deliberately slow. The cameras are microcontrollers sharing
@@ -93,7 +93,10 @@ func (m *Manager) Sync(cams []store.Camera) {
 
 	var stopped []*device
 	for id, d := range m.devices {
-		if _, ok := wanted[id]; !ok {
+		// A camera whose address or credentials changed is a different device
+		// as far as the session and the poller are concerned, so it is torn
+		// down and started again rather than left talking to the old address.
+		if want, ok := wanted[id]; !ok || want != d.cam {
 			delete(m.devices, id)
 			stopped = append(stopped, d)
 		}

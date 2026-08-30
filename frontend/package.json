@@ -1,5 +1,5 @@
 {
-  "name": "esp32-cam-nvr-frontend",
+  "name": "argus-nvr-frontend",
   "private": true,
   "version": "0.1.0",
   "type": "module",

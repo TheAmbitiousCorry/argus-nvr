@@ -1,4 +1,4 @@
-# esp32cam-nvr backend
+# argus-nvr backend
 
 One Go binary that puts several ESP32-CAM cameras behind a single HTTP service.
 It holds each camera's login session, proxies their MJPEG video, caches their
@@ -55,8 +55,8 @@ reload.
 ### Docker
 
 ```sh
-docker build -t esp32cam-nvr .
-docker run --rm -p 8080:8080 -v "$PWD/data":/data esp32cam-nvr
+docker build -t argus-nvr .
+docker run --rm -p 8080:8080 -v "$PWD/data":/data argus-nvr
 ```
 
 Add `--network host` for mDNS discovery to work: multicast does not cross

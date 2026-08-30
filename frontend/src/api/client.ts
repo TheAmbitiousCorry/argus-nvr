@@ -1,4 +1,12 @@
-import type { Camera, CameraStatus, DiscoveredCamera, NewCamera } from '@/types'
+import type {
+  BulkResponse,
+  Camera,
+  CameraConfig,
+  CameraStatus,
+  DiscoveredCamera,
+  NewCamera,
+  SettingsRequest,
+} from '@/types'
 
 /**
  * Empty in both dev and production: the Vite dev server proxies /api to the Go
@@ -104,6 +112,22 @@ export const api = {
   listDiscovered: (signal?: AbortSignal) =>
     request<DiscoveredCamera[]>('/api/discovered', { signal }),
 
+  /** The camera's whole /config document. 502 when the camera did not answer. */
+  cameraConfig: (id: string, signal?: AbortSignal) =>
+    request<CameraConfig>(`/api/cameras/${encodeURIComponent(id)}/config`, { signal }),
+
+  /**
+   * Applies a partial patch to several cameras at once. Always 200, with one
+   * result per camera, so read `results` rather than trusting the status.
+   */
+  applySettings: (input: SettingsRequest, signal?: AbortSignal) =>
+    request<BulkResponse>('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+      signal,
+    }),
+
   health: (signal?: AbortSignal) => request<unknown>('/healthz', { signal }),
 
   streamUrl: (id: string, nonce?: number | string) =>
@@ -111,4 +135,67 @@ export const api = {
 
   snapshotUrl: (id: string, nonce?: number | string) =>
     withNonce(`/api/cameras/${encodeURIComponent(id)}/snapshot`, nonce),
+}
+
+/**
+ * Sends firmware to one or more cameras.
+ *
+ * The upload is driven by XMLHttpRequest rather than fetch because it is the
+ * only way to watch the request body leave the browser, and a firmware image
+ * over a slow link is the one place in this app where that matters.
+ */
+export function uploadFirmware(opts: {
+  file: File
+  cameraIds: string[]
+  onProgress?: (fraction: number) => void
+  signal?: AbortSignal
+}): Promise<BulkResponse> {
+  const url = `${BASE}/api/firmware`
+  return new Promise((resolve, reject) => {
+    const form = new FormData()
+    form.append('file', opts.file, opts.file.name)
+    form.append('cameraIds', opts.cameraIds.join(','))
+
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', url)
+    xhr.setRequestHeader('Accept', 'application/json')
+
+    xhr.upload.addEventListener('progress', (ev) => {
+      if (ev.lengthComputable && ev.total > 0) opts.onProgress?.(ev.loaded / ev.total)
+    })
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new ApiError(errorFromText(xhr.responseText, xhr.status, xhr.statusText), xhr.status, url))
+        return
+      }
+      try {
+        resolve(JSON.parse(xhr.responseText) as BulkResponse)
+      } catch {
+        reject(new ApiError('Backend sent a response that is not JSON', xhr.status, url))
+      }
+    })
+    xhr.addEventListener('error', () =>
+      reject(new ApiError('Cannot reach the NVR backend', 0, url)),
+    )
+    xhr.addEventListener('abort', () => reject(new ApiError('Upload cancelled', 0, url)))
+
+    opts.signal?.addEventListener('abort', () => xhr.abort(), { once: true })
+    xhr.send(form)
+  })
+}
+
+function errorFromText(body: string, status: number, statusText: string): string {
+  const trimmed = (body ?? '').trim()
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as { error?: string; message?: string }
+      const detail = parsed.error ?? parsed.message
+      if (detail) return detail
+    } catch {
+      /* fall through to the raw body */
+    }
+  }
+  if (trimmed) return trimmed.slice(0, 300)
+  return `${status} ${statusText || 'request failed'}`
 }

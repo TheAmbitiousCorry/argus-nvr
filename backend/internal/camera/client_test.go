@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"esp32cam-nvr/internal/store"
+	"argus-nvr/internal/store"
 )
 
 // fakeCamera imitates the firmware's session behaviour: a login hands out an

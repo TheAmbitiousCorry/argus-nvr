@@ -120,6 +120,33 @@ func (s *Store) Add(c Camera) (Camera, error) {
 	return c, nil
 }
 
+// SetAddress rewrites one camera's address, for when the address it was added
+// under turns out not to be the one that resolves. It reports whether anything
+// changed so callers can skip restarting a device that is already right.
+func (s *Store) SetAddress(id, addr string) (bool, error) {
+	if addr == "" {
+		return false, errors.New("address is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, c := range s.cams {
+		if c.ID != id {
+			continue
+		}
+		if c.Address == addr {
+			return false, nil
+		}
+		old := c.Address
+		s.cams[i].Address = addr
+		if err := s.saveLocked(); err != nil {
+			s.cams[i].Address = old
+			return false, err
+		}
+		return true, nil
+	}
+	return false, ErrNotFound
+}
+
 // Delete removes a camera by ID.
 func (s *Store) Delete(id string) error {
 	s.mu.Lock()

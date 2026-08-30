@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"esp32cam-nvr/internal/store"
+	"argus-nvr/internal/store"
 )
 
 // fakeStream serves an endless MJPEG stream and counts how many clients are

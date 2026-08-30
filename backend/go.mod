@@ -1,4 +1,4 @@
-module esp32cam-nvr
+module argus-nvr
 
 go 1.23
 

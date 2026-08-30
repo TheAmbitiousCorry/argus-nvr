@@ -3,6 +3,7 @@
 package camera
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -15,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"esp32cam-nvr/internal/store"
+	"argus-nvr/internal/store"
 )
 
 // defaultStreamPort is fixed by the firmware: video is served from a second
@@ -30,6 +31,12 @@ const (
 	requestTimeout = 10 * time.Second
 	loginTimeout   = 10 * time.Second
 )
+
+// uploadHeaderTimeout bounds the wait for the reply to a firmware upload. The
+// camera erases and writes flash before it answers, so the gap between the last
+// byte sent and the first byte of the response is much longer than any other
+// request here, and cutting it short would report a successful flash as failed.
+const uploadHeaderTimeout = 3 * time.Minute
 
 // ErrUnauthorized means the camera rejected our credentials, as opposed to
 // merely having forgotten the session.
@@ -49,6 +56,7 @@ type Client struct {
 
 	api    *http.Client
 	stream *http.Client
+	upload *http.Client
 
 	mu  sync.Mutex
 	sid string
@@ -74,6 +82,18 @@ func New(cam store.Camera) *Client {
 				MaxIdleConnsPerHost:   2,
 				IdleConnTimeout:       30 * time.Second,
 				ResponseHeaderTimeout: requestTimeout,
+			},
+		},
+		upload: &http.Client{
+			// No client timeout: the body is over a megabyte and the camera
+			// writes it to flash before replying, so the bound is the
+			// context the caller passes plus the header timeout below.
+			CheckRedirect: noRedirect,
+			Transport: &http.Transport{
+				// The camera reboots the moment it has answered, so a pooled
+				// connection here is always a dead one.
+				DisableKeepAlives:     true,
+				ResponseHeaderTimeout: uploadHeaderTimeout,
 			},
 		},
 		stream: &http.Client{
@@ -105,6 +125,37 @@ func (c *Client) streamURL(path string) string {
 func (c *Client) Get(ctx context.Context, path string) (*http.Response, error) {
 	return c.do(ctx, c.api, func(ctx context.Context) (*http.Request, error) {
 		return http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL()+path, nil)
+	})
+}
+
+// PostForm issues an authenticated form post against the camera's port 80 API.
+// The firmware's form handlers take a whole form, so callers build the complete
+// set of fields rather than only the ones they mean to change.
+func (c *Client) PostForm(ctx context.Context, path string, form url.Values) (*http.Response, error) {
+	body := form.Encode()
+	return c.do(ctx, c.api, func(ctx context.Context) (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL()+path, strings.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return req, nil
+	})
+}
+
+// PostRaw posts bytes as the request body with Content-Length set, which is
+// what /update wants: the firmware reads the image straight off the socket and
+// does not parse multipart. The body is rebuilt on a retry, so a request that
+// has to log in again is replayed intact.
+func (c *Client) PostRaw(ctx context.Context, path, contentType string, body []byte) (*http.Response, error) {
+	return c.do(ctx, c.upload, func(ctx context.Context) (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL()+path, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", contentType)
+		req.ContentLength = int64(len(body))
+		return req, nil
 	})
 }
 

@@ -1,0 +1,10 @@
+<body style="margin:0;background:#111;display:flex;gap:60px;align-items:center;justify-content:center;height:100vh;color:#eee">
+<div style="text-align:center"><div style="width:150px">EYE</div><div id=a></div></div>
+<div style="text-align:center"><div>MARK</div><div id=b></div></div>
+<div style="text-align:center;background:#eee;color:#111;padding:20px;border-radius:8px"><div>on light</div><div id=c style="width:70px"></div></div>
+</body>
+<script>
+fetch('argus-eye.svg').then(r=>r.text()).then(t=>{document.getElementById('a').innerHTML=t;document.querySelector('#a svg').style.width='120px';
+  document.getElementById('c').innerHTML=t;document.querySelector('#c svg').style.width='60px';});
+fetch('argus-mark.svg').then(r=>r.text()).then(t=>{document.getElementById('b').innerHTML=t;document.querySelector('#b svg').style.width='240px';});
+</script>

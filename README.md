@@ -1,7 +1,14 @@
-# esp32-cam-nvr
+# Argus NVR
+
+<img src="docs/brand/argus-mark.svg" alt="" width="86" align="right">
 
 Watches several ESP32-CAM cameras from one screen. The cameras run the firmware
-in the sibling repository `esp32-cam-fw`.
+in the sibling repository
+[esp32-cam-fw](https://github.com/TheAmbitiousCorry/esp32-cam-fw).
+
+Named for Argus Panoptes, who watched with a hundred eyes and never closed more
+than half of them at once. Each camera is one eye of him, and carries one eye as
+its own mark.
 
 A Go service holds the cameras' credentials, keeps a session with each, and
 re-serves their video. A Vue interface shows them as a wall.

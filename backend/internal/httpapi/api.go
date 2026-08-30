@@ -6,18 +6,27 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 
-	"esp32cam-nvr/internal/camera"
-	"esp32cam-nvr/internal/discovery"
-	"esp32cam-nvr/internal/manager"
-	"esp32cam-nvr/internal/store"
+	"argus-nvr/internal/camera"
+	"argus-nvr/internal/discovery"
+	"argus-nvr/internal/manager"
+	"argus-nvr/internal/store"
 )
 
 const snapshotTimeout = 10 * time.Second
+
+// configTimeout allows for a read that first has to log in again, which costs
+// two round trips to a device that answers slowly when it is busy.
+const configTimeout = 25 * time.Second
+
+// maxFirmwareUpload is well clear of the roughly 1.4MB images these cameras
+// take, while keeping a mistaken upload from being read into memory.
+const maxFirmwareUpload = 8 << 20
 
 // Server wires the stores and background workers to HTTP handlers.
 type Server struct {
@@ -46,9 +55,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/cameras", s.addCamera)
 	mux.HandleFunc("DELETE /api/cameras/{id}", s.deleteCamera)
 	mux.HandleFunc("GET /api/cameras/{id}/status", s.cameraStatus)
+	mux.HandleFunc("GET /api/cameras/{id}/config", s.cameraConfig)
 	mux.HandleFunc("GET /api/cameras/{id}/snapshot", s.snapshot)
 	mux.HandleFunc("GET /api/cameras/{id}/stream", s.stream)
 	mux.HandleFunc("GET /api/discovered", s.discovered)
+	mux.HandleFunc("POST /api/settings", s.bulkSettings)
+	mux.HandleFunc("POST /api/firmware", s.bulkFirmware)
 
 	if s.static != nil {
 		mux.Handle("/", s.static)
@@ -95,9 +107,21 @@ func (s *Server) addCamera(w http.ResponseWriter, r *http.Request) {
 	// A pasted URL is the obvious mistake to make here, so accept one.
 	req.Address = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(req.Address, "http://"), "https://"), "/")
 
+	name := strings.TrimSpace(req.Name)
+	// A camera offered by discovery is usually added under its .local name,
+	// which does not resolve in the container, so it is stored as the IP
+	// discovery saw it at. The name it was added under is worth keeping as the
+	// label, since an IP makes a poor one.
+	if addr, moved := s.discoverer.ResolveAddress(req.Address); moved {
+		if name == "" {
+			name = req.Address
+		}
+		req.Address = addr
+	}
+
 	cam, err := s.store.Add(store.Camera{
 		Address: req.Address,
-		Name:    strings.TrimSpace(req.Name),
+		Name:    name,
 		User:    req.User,
 		Pass:    req.Pass,
 	})
@@ -224,6 +248,104 @@ func (s *Server) discovered(w http.ResponseWriter, r *http.Request) {
 		hosts = []discovery.Host{}
 	}
 	writeJSON(w, http.StatusOK, hosts)
+}
+
+// cameraConfig passes the camera's whole /config through untouched, so a
+// setting a later firmware gains needs no change on this side.
+func (s *Server) cameraConfig(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := s.store.Get(id); err != nil {
+		writeError(w, http.StatusNotFound, "no such camera")
+		return
+	}
+	ctx, cancel := contextWithTimeout(r, configTimeout)
+	defer cancel()
+
+	cfg, err := s.manager.Config(ctx, id)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("camera did not answer: %v", err))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(cfg)
+}
+
+// settingsRequest is a partial update for any number of cameras. The values
+// stay as raw JSON so the field names, and only the field names, are this
+// service's business.
+type settingsRequest struct {
+	CameraIDs []string                   `json:"cameraIds"`
+	Image     map[string]json.RawMessage `json:"image"`
+	Recording map[string]json.RawMessage `json:"recording"`
+}
+
+// bulkSettings answers 200 whatever the cameras did, with one result each: a
+// camera that is offline is news about that camera, not a failed request.
+func (s *Server) bulkSettings(w http.ResponseWriter, r *http.Request) {
+	var req settingsRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	results := s.manager.ApplySettings(r.Context(), req.CameraIDs, camera.Settings{
+		Image:     req.Image,
+		Recording: req.Recording,
+	})
+	writeResults(w, results)
+}
+
+// bulkFirmware relays one uploaded image to each camera in turn. The image is
+// read into memory rather than streamed because each camera needs its own copy
+// of the bytes and the firmware needs a Content-Length up front.
+func (s *Server) bulkFirmware(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFirmwareUpload)
+	if err := r.ParseMultipartForm(4 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "expected multipart/form-data with a file and cameraIds")
+		return
+	}
+	defer r.MultipartForm.RemoveAll()
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "file is required")
+		return
+	}
+	defer file.Close()
+
+	image, err := io.ReadAll(io.LimitReader(file, maxFirmwareUpload))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "could not read the uploaded file")
+		return
+	}
+	if len(image) == 0 {
+		writeError(w, http.StatusBadRequest, "the uploaded file is empty")
+		return
+	}
+
+	writeResults(w, s.manager.Flash(r.Context(), cameraIDs(r.Form["cameraIds"]), image))
+}
+
+// cameraIDs reads the comma-separated list, tolerating the field being repeated
+// rather than joined, which is what a form builder is as likely to produce.
+func cameraIDs(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		for _, id := range strings.Split(v, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
+
+func writeResults(w http.ResponseWriter, results []manager.Result) {
+	if results == nil {
+		results = []manager.Result{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": results})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
