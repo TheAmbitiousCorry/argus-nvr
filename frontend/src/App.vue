@@ -35,6 +35,7 @@ const backend = computed(() => {
       </RouterLink>
       <div class="links">
         <RouterLink to="/">Wall</RouterLink>
+        <RouterLink to="/files">Files</RouterLink>
         <RouterLink to="/add">Add camera</RouterLink>
         <RouterLink to="/settings">Settings</RouterLink>
         <RouterLink to="/firmware">Firmware</RouterLink>

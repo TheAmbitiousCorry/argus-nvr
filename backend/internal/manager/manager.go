@@ -34,6 +34,20 @@ const pollTimeout = 12 * time.Second
 
 const maxRecordBody = 64 << 10
 
+// firmwareEvery is how often a camera is asked what it is running. It is read
+// on the same poll as everything else rather than on a timer of its own,
+// because a camera has one radio and a second schedule of requests against it
+// is a second thing stealing frames from viewers. A build changes about once a
+// day, so re-reading it every few minutes is already far more often than it can
+// change.
+const firmwareEvery = 5 * time.Minute
+
+// firmwareRetry is how soon a camera that has not answered /version is asked
+// again. A firmware from before the route existed answers 404 forever, so this
+// is slow enough that asking is free and quick enough that a camera updated
+// into having the route is not stale for the rest of the afternoon.
+const firmwareRetry = 1 * time.Minute
+
 // Status is the cached view of a camera. Record is kept as raw JSON so fields
 // the firmware adds reach the UI without this service knowing about them; the
 // live camera already returns several that the API docs do not list.
@@ -61,9 +75,14 @@ type Status struct {
 }
 
 // CameraView is one entry in the camera list API.
+//
+// Firmware is what the camera reports from its own /version, passed through
+// unchanged so a field the firmware gains needs no change here. It is absent
+// until the camera has answered.
 type CameraView struct {
 	store.Public
-	Status Status `json:"status"`
+	Status   Status          `json:"status"`
+	Firmware json.RawMessage `json:"firmware,omitempty"`
 }
 
 // frameSource is where a recording made on a camera's behalf gets its frames.
@@ -99,6 +118,13 @@ type device struct {
 	// fetching is set while a recording is being downloaded off this camera's
 	// card, which is when the poll stands aside.
 	fetching bool
+
+	// firmware is the camera's own /version document, and firmwareAt when it
+	// was last asked for, answer or not. Caching it is the whole reason the
+	// poll can carry it: it changes about once a day and the poll runs every
+	// two seconds.
+	firmware   json.RawMessage
+	firmwareAt time.Time
 
 	// captureMissing records that this firmware has no /capture route, so the
 	// snapshot path stops asking for it after the first 404. The live camera's
@@ -237,6 +263,7 @@ func (m *Manager) Views(cams []store.Camera) []CameraView {
 		v := CameraView{Public: c.Public()}
 		if d, ok := m.get(c.ID); ok {
 			v.Status = d.snapshotStatus()
+			v.Firmware = d.snapshotFirmware()
 		}
 		out = append(out, v)
 	}
@@ -250,6 +277,12 @@ func (d *device) snapshotStatus() Status {
 	d.mu.RUnlock()
 	s.Viewers = d.hub.Viewers()
 	return s
+}
+
+func (d *device) snapshotFirmware() json.RawMessage {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.firmware
 }
 
 // poll refreshes /record on a fixed interval. The first tick is jittered so a
@@ -291,6 +324,18 @@ func (d *device) pollOnce(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, pollTimeout)
 	defer cancel()
 
+	if !d.pollRecord(ctx) {
+		return
+	}
+	// The build the camera is running rides on the same poll, on its own much
+	// slower schedule. Asking a camera that has just answered costs one more
+	// round trip on a connection that is already warm; asking on a timer of its
+	// own would cost a second thing competing with the video for the radio.
+	d.pollFirmware(ctx)
+}
+
+// pollRecord refreshes /record and reports whether the camera answered.
+func (d *device) pollRecord(ctx context.Context) bool {
 	body, err := d.record(ctx)
 	now := time.Now()
 
@@ -300,7 +345,7 @@ func (d *device) pollOnce(ctx context.Context) {
 	if err != nil {
 		d.status.Online = false
 		d.status.Error = err.Error()
-		return
+		return false
 	}
 	d.status.Online = true
 	d.status.Error = ""
@@ -316,6 +361,35 @@ func (d *device) pollOnce(ctx context.Context) {
 	if err := json.Unmarshal(body, &state); err == nil {
 		d.recording = state.Active
 		d.storage = state.Storage
+	}
+	return true
+}
+
+// pollFirmware re-reads /version when the cached answer is old enough to be
+// worth replacing. A camera that does not answer keeps whatever was last read:
+// a firmware that has gone quiet for one request has not changed, and blanking
+// the field would make the UI flicker on every missed poll.
+func (d *device) pollFirmware(ctx context.Context) {
+	d.mu.RLock()
+	due := d.firmwareAt
+	have := d.firmware != nil
+	d.mu.RUnlock()
+
+	every := firmwareEvery
+	if !have {
+		every = firmwareRetry
+	}
+	if !due.IsZero() && time.Since(due) < every {
+		return
+	}
+
+	body, err := d.client.Version(ctx)
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.firmwareAt = time.Now()
+	if err == nil {
+		d.firmware = body
 	}
 }
 

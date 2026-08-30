@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import CameraPicker from '@/components/CameraPicker.vue'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 import { ApiError, uploadFirmware } from '@/api/client'
-import { isOnline, useCameraStore } from '@/composables/useCameraStore'
+import { cameraFirmware, isOnline, useCameraStore } from '@/composables/useCameraStore'
 
 const { cameras, statuses, loaded } = useCameraStore()
 
@@ -49,6 +49,21 @@ const canFlash = computed(
 const offlineSelected = computed(() =>
   cameras.value.filter((c) => selected.value.includes(c.id) && !isOnline(c)),
 )
+
+/** What the fleet is running, so a camera left behind stands out from the list. */
+const versions = computed(() => {
+  const counts = new Map<string, number>()
+  let unknown = 0
+  for (const cam of cameras.value) {
+    const version = cameraFirmware(cam)?.version
+    if (version) counts.set(version, (counts.get(version) ?? 0) + 1)
+    else unknown += 1
+  }
+  return { counts: [...counts].sort((a, b) => b[1] - a[1]), unknown }
+})
+
+const onTrial = computed(() => cameras.value.filter((c) => cameraFirmware(c)?.onTrial))
+const rolledBack = computed(() => cameras.value.filter((c) => cameraFirmware(c)?.rolledBackFrom))
 
 const summary = computed(() => {
   const values = Object.values(progress.value)
@@ -188,17 +203,44 @@ const orderedProgress = computed(() =>
 
     <div class="card">
       <h2>Cameras</h2>
+      <p v-if="versions.counts.length || versions.unknown" class="note">
+        Running:
+        <template v-for="([version, count], i) in versions.counts" :key="version">
+          <template v-if="i > 0">, </template>
+          <span class="ver">{{ version }}</span> on {{ count }}
+        </template>
+        <template v-if="versions.unknown">
+          <template v-if="versions.counts.length">, </template>
+          {{ versions.unknown }} not answering
+        </template>
+      </p>
+
       <CameraPicker
         v-model="selected"
         :cameras="cameras"
         :statuses="statuses"
         :detail="pickerDetail"
+        show-firmware
       />
       <p v-if="!loaded" class="note">Loading cameras...</p>
       <p v-else-if="offlineSelected.length > 0" class="warn">
         {{ offlineSelected.map((c) => c.name).join(', ') }}
         {{ offlineSelected.length === 1 ? 'is' : 'are' }} offline. Flashing one will fail and
         stop the run.
+      </p>
+
+      <!-- An image on trial is one reboot away from disappearing, and a
+           rollback nobody noticed is a camera quietly running old code. Both
+           are said here as well as under the address, because the point of them
+           is being seen. -->
+      <p v-if="onTrial.length" class="warn">
+        {{ onTrial.map((c) => c.name).join(', ') }}
+        {{ onTrial.length === 1 ? 'is' : 'are' }} running an image on trial. It reverts to the
+        previous one on the next reboot unless the camera confirms it.
+      </p>
+      <p v-for="cam in rolledBack" :key="cam.id" class="warn">
+        {{ cam.name }} rolled back from {{ cameraFirmware(cam)?.rolledBackFrom }} and is running
+        {{ cameraFirmware(cam)?.version || 'the previous image' }}.
       </p>
     </div>
 
@@ -316,6 +358,11 @@ input[type='file'] {
   background: #111;
   border: 1px dashed #2c2c2c;
   border-radius: 6px;
+}
+
+.ver {
+  color: #bbb;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .chosen {

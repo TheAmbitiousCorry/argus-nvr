@@ -6,6 +6,13 @@ export interface Camera {
   user?: string
   /** Absent only in the moment between adding a camera and the first poll. */
   status?: CameraStatusEnvelope
+  /**
+   * What the camera last said about its own image. Absent until it answers.
+   * Read it through `cameraFirmware()` rather than from here: the backend has
+   * carried per-camera readings inside the status envelope before, and one
+   * accessor is cheaper than finding out the hard way which one it is today.
+   */
+  firmware?: CameraFirmware
 }
 
 /**
@@ -20,6 +27,14 @@ export interface CameraStatusEnvelope {
   /** How many people the backend is currently relaying this camera to. */
   viewers?: number
   error?: string
+  /** See Camera.firmware: read through `cameraFirmware()`, not from either place directly. */
+  firmware?: CameraFirmware
+  /** The service is recording this camera's stream itself, because the camera cannot. */
+  standIn?: boolean
+  /** A recording is being pulled off this camera's card, which is why checkedAt has stopped. */
+  fetching?: boolean
+  pulledAt?: string
+  pullError?: string
 }
 
 /**
@@ -58,9 +73,30 @@ export interface CameraStatus {
   gc?: number
 }
 
+/**
+ * One mDNS responder the service found. These are candidates, not cameras: a
+ * router advertises _http._tcp too.
+ *
+ * The field names are the service's, checked against what it actually sends.
+ * This carried an `address` that the service has never sent, and reading it
+ * threw the moment discovery returned anything at all, which was hidden for as
+ * long as discovery returned nothing.
+ */
 export interface DiscoveredCamera {
   name: string
-  address: string
+  /** The advertised hostname, ending .local. */
+  host: string
+  ip: string
+  port: number
+  /**
+   * Whether the responder said it is a camera. Every web server advertises the
+   * same service, so without this the list offers routers and printers as
+   * cameras to add.
+   */
+  camera: boolean
+  /** The firmware it advertised, when it said. */
+  firmware?: string
+  seen: string
 }
 
 export interface NewCamera {
@@ -143,4 +179,78 @@ export interface BulkResult {
 
 export interface BulkResponse {
   results: BulkResult[]
+}
+
+/**
+ * What a camera reports from its own /version, passed through by the backend
+ * unchanged, so a field the firmware gains needs no change here. Absent when
+ * the camera has not answered yet.
+ */
+export interface CameraFirmware {
+  version?: string
+  built?: string
+  /** Which OTA slot is running, as "1/1". */
+  slot?: string
+  /** An image on trial reverts to the one before it if the camera reboots. */
+  onTrial?: boolean
+  /** The version this one replaced after a rollback. Empty when there was none. */
+  rolledBackFrom?: string
+  [key: string]: unknown
+}
+
+/**
+ * One recording the service holds. The path is the identity: camera, day and
+ * start time are what every other route is asked for.
+ */
+export interface Recording {
+  cameraId: string
+  day: string
+  /** HHMMSS, the last segment of the recording's path. */
+  at: string
+  /**
+   * The camera's clock, with no timezone on it. The service does not know what
+   * that clock is set to, so nothing here converts it.
+   */
+  startedAt: string
+  durMs: number
+  bytes: number
+  /** Absent when the camera's listing did not say. */
+  frames?: number
+  /**
+   * `camera` is a copy of something that also exists on a card. `service` is
+   * the only copy there is, recorded from the stream because the camera could
+   * not write it.
+   */
+  source: 'camera' | 'service'
+  /** This service's clock, which does carry a zone. */
+  heldAt: string
+}
+
+export interface RecordingsPage {
+  recordings: Recording[]
+  start: number
+  /** Absent rather than false on the last page, so read it as optional. */
+  more?: boolean
+}
+
+/** One camera's holdings for one day, so a date can be offered before it is asked for. */
+export interface RecordingDay {
+  cameraId: string
+  day: string
+  recordings: number
+  bytes: number
+}
+
+export interface RecordingDays {
+  days: RecordingDay[]
+}
+
+/** The frame index, so a scrubber knows where it can land. */
+export interface RecordingFrames {
+  frames: number
+  durMs: number
+  width?: number
+  height?: number
+  /** Milliseconds from the start of the recording, one per frame. */
+  times: number[]
 }

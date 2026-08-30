@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import StateDot from '@/components/StateDot.vue'
-import { cameraState, isOnline } from '@/composables/useCameraStore'
+import { cameraFirmware, cameraState, isOnline } from '@/composables/useCameraStore'
 import type { Camera, CameraStatus } from '@/types'
 
 const props = defineProps<{
@@ -10,6 +10,8 @@ const props = defineProps<{
   modelValue: string[]
   /** Shown under a camera's name: a config load error, a flash result, whatever the view knows. */
   detail?: Record<string, string>
+  /** Adds a line under the address with what each camera is currently running. */
+  showFirmware?: boolean
 }>()
 
 const emit = defineEmits<{ 'update:modelValue': [string[]] }>()
@@ -60,6 +62,37 @@ function setAll(ids: string[]) {
           <span class="addr">{{ cam.address }}</span>
           <span v-if="!isOnline(cam)" class="tag offline">offline</span>
           <span v-if="detail?.[cam.id]" class="tag">{{ detail[cam.id] }}</span>
+
+          <!-- Under the address, because what a camera is running is a property
+               of the box at that address rather than of the name we gave it. -->
+          <span v-if="showFirmware" class="fw">
+            <template v-if="cameraFirmware(cam)">
+              <span class="ver">{{ cameraFirmware(cam)?.version || 'unnamed build' }}</span>
+              <span v-if="cameraFirmware(cam)?.slot" class="fwbit">
+                slot {{ cameraFirmware(cam)?.slot }}
+              </span>
+              <span v-if="cameraFirmware(cam)?.built" class="fwbit">
+                built {{ cameraFirmware(cam)?.built }}
+              </span>
+              <!-- An image on trial goes back to the one before it the moment
+                   the camera reboots, so it has to be visible before then. -->
+              <span
+                v-if="cameraFirmware(cam)?.onTrial"
+                class="fwtag trial"
+                title="On trial: this image reverts to the previous one if the camera reboots before it is confirmed"
+              >
+                on trial
+              </span>
+              <span
+                v-if="cameraFirmware(cam)?.rolledBackFrom"
+                class="fwtag back"
+                :title="`Rolled back from ${cameraFirmware(cam)?.rolledBackFrom}`"
+              >
+                rolled back from {{ cameraFirmware(cam)?.rolledBackFrom }}
+              </span>
+            </template>
+            <span v-else class="fwbit">firmware unknown, the camera has not answered</span>
+          </span>
         </label>
       </li>
     </ul>
@@ -163,6 +196,38 @@ input[type='checkbox'] {
 .tag.offline {
   color: #f55;
   border-color: #5a2020;
+}
+
+.fw {
+  flex: 0 0 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.45rem;
+  margin-left: 1.5rem;
+  font-size: 0.7rem;
+  color: #7a7a7a;
+}
+
+.ver {
+  color: #bbb;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.fwbit {
+  color: #6a6a6a;
+}
+
+.fwtag {
+  font-size: 0.66rem;
+  padding: 0.02rem 0.3rem;
+  border-radius: 4px;
+  border: 1px solid #5a4520;
+  color: #c90;
+}
+.fwtag.back {
+  border-color: #5a2020;
+  color: #f55;
 }
 
 .empty {

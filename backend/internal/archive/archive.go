@@ -813,3 +813,16 @@ func (s *Store) pruneEmptyDays() {
 		}
 	}
 }
+
+// Meta returns what the sidecar beside a recording says about it: the length
+// and frame count the camera reported, which the AVI itself cannot state as
+// precisely, and where the recording came from.
+func (s *Store) Meta(id ID) (Meta, error) {
+	if !id.valid() {
+		return Meta{}, ErrNotFound
+	}
+	if !s.Has(id) {
+		return Meta{}, ErrNotFound
+	}
+	return s.readMeta(id), nil
+}

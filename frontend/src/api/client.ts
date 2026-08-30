@@ -5,6 +5,10 @@ import type {
   CameraStatus,
   DiscoveredCamera,
   NewCamera,
+  Recording,
+  RecordingDays,
+  RecordingFrames,
+  RecordingsPage,
   SettingsRequest,
 } from '@/types'
 
@@ -93,6 +97,23 @@ function withNonce(path: string, nonce?: number | string): string {
   return nonce === undefined ? BASE + path : `${BASE}${path}?t=${nonce}`
 }
 
+/**
+ * A recording's path is its identity: camera, day and start time, in that
+ * order. Every route that acts on one recording hangs off this.
+ */
+function recordingPath(cameraId: string, day: string, at: string): string {
+  return `/api/recordings/${encodeURIComponent(cameraId)}/${encodeURIComponent(day)}/${encodeURIComponent(at)}`
+}
+
+function query(params: Record<string, string | number | undefined>): string {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') search.set(key, String(value))
+  }
+  const out = search.toString()
+  return out ? `?${out}` : ''
+}
+
 export const api = {
   listCameras: (signal?: AbortSignal) => request<Camera[]>('/api/cameras', { signal }),
 
@@ -135,6 +156,52 @@ export const api = {
 
   snapshotUrl: (id: string, nonce?: number | string) =>
     withNonce(`/api/cameras/${encodeURIComponent(id)}/snapshot`, nonce),
+
+  /** Everything held, newest first. 404 when the service has no recordings directory. */
+  listRecordings: (
+    params: { cameraId?: string; day?: string; start?: number; limit?: number } = {},
+    signal?: AbortSignal,
+  ) => request<RecordingsPage>(`/api/recordings${query(params)}`, { signal }),
+
+  /** The days that hold something, so a date can be offered without paging the lot. */
+  recordingDays: (cameraId?: string, signal?: AbortSignal) =>
+    request<RecordingDays>(`/api/recordings/days${query({ cameraId })}`, { signal }),
+
+  /** Per-frame times, so a scrubber knows where it can land. */
+  recordingFrames: (cameraId: string, day: string, at: string, signal?: AbortSignal) =>
+    request<RecordingFrames>(`${recordingPath(cameraId, day, at)}/frames`, { signal }),
+
+  /** The AVI itself, for download. Ranges are answered, so a player can seek in it. */
+  recordingUrl: (cameraId: string, day: string, at: string) =>
+    BASE + recordingPath(cameraId, day, at),
+
+  /**
+   * The same recording replayed as multipart/x-mixed-replace, which an <img>
+   * plays with no decoding in the page. This is the only way to watch one here:
+   * they are MJPEG inside AVI, which no browser decodes, so a <video> pointed
+   * at the download URL shows nothing at all.
+   *
+   * `from` is a frame number, so seeking does not replay from the beginning.
+   * `speed` is 0.5, 1, 2 or 4; 0 sends frames as fast as they can be read.
+   */
+  recordingStreamUrl: (
+    cameraId: string,
+    day: string,
+    at: string,
+    opts: { from?: number; speed?: number; nonce?: number | string } = {},
+  ) =>
+    BASE +
+    `${recordingPath(cameraId, day, at)}/stream` +
+    query({ from: opts.from, speed: opts.speed, t: opts.nonce }),
+}
+
+/**
+ * What to call a downloaded recording. Without this the browser names the file
+ * after the URL's last segment, which is six digits and no camera.
+ */
+export function recordingFileName(rec: Recording, cameraName?: string): string {
+  const who = (cameraName ?? rec.cameraId).replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '')
+  return `${who || rec.cameraId}-${rec.day}-${rec.at}.avi`
 }
 
 /**

@@ -23,11 +23,28 @@ const addingAddress = ref<string | null>(null)
 let discoveryTimer: ReturnType<typeof setInterval> | null = null
 
 /** The backend already filters these, but a stale poll can still overlap. */
+/**
+ * What to add a responder as. The IP, because it is what resolves from anywhere
+ * including inside a container, and the hostname only when there is no IP.
+ */
+function discoveredAddress(d: DiscoveredCamera): string {
+  return (d.ip || d.host || '').trim().toLowerCase()
+}
+
+// Responders that answered but did not say they are cameras: routers, printers,
+// anything with a status page. Counted rather than listed, so the list stays
+// offerable while still admitting that something else is out there.
+const otherResponders = computed(
+  () => discovered.value.filter((d) => !d.camera).length,
+)
+
 const knownAddresses = computed(
   () => new Set(cameras.value.map((c) => c.address.trim().toLowerCase())),
 )
 const unaddedDiscoveries = computed(() =>
-  discovered.value.filter((d) => !knownAddresses.value.has(d.address.trim().toLowerCase())),
+  discovered.value
+    .filter((d) => d.camera)
+    .filter((d) => !knownAddresses.value.has(discoveredAddress(d))),
 )
 
 async function loadDiscovered() {
@@ -86,17 +103,17 @@ async function submit() {
  */
 async function addDiscovered(entry: DiscoveredCamera) {
   if (addingAddress.value) return
-  addingAddress.value = entry.address
+  addingAddress.value = discoveredAddress(entry)
   formError.value = null
   success.value = null
   try {
     await addCamera({
-      address: entry.address,
-      name: entry.name || entry.address,
+      address: discoveredAddress(entry),
+      name: entry.name || discoveredAddress(entry),
       user: form.user,
       pass: form.pass,
     })
-    success.value = `Added ${entry.name || entry.address}.`
+    success.value = `Added ${entry.name || discoveredAddress(entry)}.`
     await loadDiscovered()
   } catch (err) {
     formError.value = describe(err)
@@ -172,7 +189,13 @@ onBeforeUnmount(() => {
 
       <div class="card discovered">
         <h2>Found on the network</h2>
-        <p class="note">Cameras advertising over mDNS that are not on the wall yet.</p>
+        <p class="note">
+          Cameras advertising over mDNS that are not on the wall yet.
+          <template v-if="otherResponders">
+            {{ otherResponders }} other device{{ otherResponders === 1 ? '' : 's' }} answered
+            but did not say it was a camera, so it is not offered here.
+          </template>
+        </p>
 
         <ErrorBanner
           v-if="discoveryError"
@@ -185,10 +208,10 @@ onBeforeUnmount(() => {
         <p v-else-if="unaddedDiscoveries.length === 0" class="note">Nothing new found.</p>
 
         <ul v-else class="list">
-          <li v-for="entry in unaddedDiscoveries" :key="entry.address">
+          <li v-for="entry in unaddedDiscoveries" :key="discoveredAddress(entry)">
             <div class="entry">
-              <span class="entry-name">{{ entry.name || entry.address }}</span>
-              <span class="entry-addr">{{ entry.address }}</span>
+              <span class="entry-name">{{ entry.name || discoveredAddress(entry) }}</span>
+              <span class="entry-addr">{{ discoveredAddress(entry) }}</span>
             </div>
             <button
               type="button"
@@ -196,7 +219,7 @@ onBeforeUnmount(() => {
               :disabled="addingAddress !== null"
               @click="addDiscovered(entry)"
             >
-              {{ addingAddress === entry.address ? 'Adding...' : 'Add' }}
+              {{ addingAddress === discoveredAddress(entry) ? 'Adding...' : 'Add' }}
             </button>
           </li>
         </ul>

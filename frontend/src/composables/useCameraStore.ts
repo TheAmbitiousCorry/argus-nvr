@@ -1,6 +1,6 @@
 import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import { ApiError, api } from '@/api/client'
-import type { Camera, CameraState, CameraStatus, NewCamera } from '@/types'
+import type { Camera, CameraFirmware, CameraState, CameraStatus, NewCamera } from '@/types'
 
 /**
  * Whether the backend reached this camera the last time it asked. It lives
@@ -9,6 +9,24 @@ import type { Camera, CameraState, CameraStatus, NewCamera } from '@/types'
  */
 export function isOnline(camera: Camera): boolean {
   return camera.status?.online === true
+}
+
+/**
+ * What the camera last reported from its own /version.
+ *
+ * Read through here rather than straight off the camera. This frontend has
+ * already once shown every camera as offline by reading `camera.online` while
+ * the backend was sending `camera.status.online`, and a version string is the
+ * same shape of guess. Both places are checked, so either answers.
+ *
+ * Undefined when the camera has not answered, which includes the empty object a
+ * backend may send in place of leaving the key out.
+ */
+export function cameraFirmware(camera: Camera): CameraFirmware | undefined {
+  const fw = camera.firmware ?? camera.status?.firmware
+  if (!fw || typeof fw !== 'object') return undefined
+  const said = fw.version || fw.built || fw.slot || fw.rolledBackFrom || fw.onTrial
+  return said ? fw : undefined
 }
 
 /** The firmware asks for a couple of seconds between polls. Take it literally. */

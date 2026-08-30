@@ -65,6 +65,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/recordings", s.listRecordings)
 	mux.HandleFunc("GET /api/recordings/days", s.recordingDays)
 	mux.HandleFunc("GET /api/recordings/{cameraId}/{day}/{at}", s.recording)
+	mux.HandleFunc("GET /api/recordings/{cameraId}/{day}/{at}/frames", s.recordingFrames)
+	mux.HandleFunc("GET /api/recordings/{cameraId}/{day}/{at}/stream", s.recordingStream)
 	mux.HandleFunc("GET /api/storage", s.storage)
 	mux.HandleFunc("POST /api/settings", s.bulkSettings)
 	mux.HandleFunc("POST /api/firmware", s.bulkFirmware)

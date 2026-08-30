@@ -14,6 +14,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/SettingsView.vue'),
   },
   {
+    path: '/files',
+    name: 'files',
+    component: () => import('@/views/FilesView.vue'),
+  },
+  {
     path: '/firmware',
     name: 'firmware',
     component: () => import('@/views/FirmwareView.vue'),
