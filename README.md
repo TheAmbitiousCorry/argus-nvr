@@ -62,6 +62,15 @@ cd ../backend && go run . -addr :8080 -static ../frontend/dist \
 `-recordings` is where footage taken off the cameras is kept, aged down to
 `-recordings-max-bytes`, oldest first, 20GB by default. An empty `-recordings`
 turns keeping off: cameras are still watched and proxied, nothing is stored.
+
+Held recordings are re-encoded from the MJPEG the cameras write to H.264 in MP4,
+which on this footage is 2.3 times smaller and is the only one of the two a
+browser plays directly. It needs ffmpeg and is optional: without one the service
+says so once at startup and holds recordings as they arrived. `-transcode-crf`
+sets the quality, 24 by default and lower is better and larger;
+`-transcode=false` turns it off; `-transcode-backfill-gap` paces the working
+through of an archive from before any of this. `docs/islanding.md` has the rest,
+including what has to be true before an original is deleted.
 </details>
 
 The cameras run [Argus Cam](https://github.com/TheAmbitiousCorry/argus-cam), the

@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,7 +24,6 @@ type countingEncoder struct {
 	mu        sync.Mutex
 	running   int
 	maxAtOnce int
-	done      atomic.Int32
 	attempts  map[string]int
 }
 
@@ -63,7 +61,6 @@ func (c *countingEncoder) Encode(ctx context.Context, src, dst string) error {
 }
 
 func (c *countingEncoder) Frames(ctx context.Context, path string) (int, error) {
-	c.done.Add(1)
 	// Every recording in these tests holds the same number of frames, so this
 	// matches by construction and the archive's check passes.
 	return queueTestFrames, nil

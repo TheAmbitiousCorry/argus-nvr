@@ -359,3 +359,189 @@ and the transcode follows it.
   driveway may want 20 and someone watching a corridor 28.
 - The interface prefers the MP4 when it exists and falls back to the replay when
   it does not, so a half transcoded archive is not a half broken one.
+
+## Transcoding, as built
+
+Written after it was built, against what runs. The design above is unchanged;
+this is where the rules, the routes and the numbers actually landed.
+
+### What runs, and when
+
+A recording is transcoded after it is stored, never before. Both paths that put
+a recording on the disk hand it over only once it is under its real name: the
+puller after the download is whole, and the stand-in recorder after the AVI is
+committed. A download that arrived cut short is thrown away without ever being
+offered, so nothing is ever encoded from a file that is not a recording.
+
+There is one worker, so one encode runs at a time whatever handed it the work.
+The encoder runs in a process group of its own at nice 10 with `-threads 1`,
+which is the design's "one at a time, at low priority" as a system call rather
+than a `nice` binary: the image has no shell to run one in.
+
+The backfill works through what was already held, newest first, one at a time,
+and only while nothing that has just arrived is waiting. Newest first because
+the oldest recordings are the ones retention is about to age out, and spending
+the machine on footage that is about to be deleted is the one order that wastes
+the work entirely. A recording that fails to encode is not tried again until a
+restart, so one bad file cannot become the thing the backfill does forever.
+
+### The identity does not change
+
+`<recordings>/<camera id>/<day>/<start time>.mp4`, beside the same
+`<start time>.json` as before. Same camera, same day, same start time, a
+different extension. The sidecar is not rewritten, so what the camera said about
+a recording survives the re-encoding of it, and the `.aged` note retention keeps
+is untouched.
+
+### What has to be true before the AVI is deleted
+
+1. The AVI's own index is read and its frames counted. The count comes from the
+   file rather than from the sidecar, because this has to compare the file
+   against the file. A recording whose index cannot be read is left exactly as
+   it is: something nothing can count is not something to replace.
+2. ffmpeg writes the MP4 under a `.part-` name, which nothing lists, retention
+   never deletes, and the next start sweeps.
+3. That file is decoded end to end and its frames counted. A full decode rather
+   than a look at the header, because the header is exactly what a truncated
+   file lies about.
+4. The counts must match, and the file must not be empty.
+5. The AVI must still be there. Retention runs on its own timer and may have
+   aged the recording out while it was being encoded; renaming the MP4 in then
+   would bring back footage the archive had already let go.
+6. The MP4 is renamed into place, and only then is the AVI removed.
+
+Anything that fails leaves the AVI byte for byte as it was and the temp file
+gone. A crash between 5 and 6 leaves both forms on the disk, which is read
+everywhere as one recording in the form that was verified, and the next attempt
+at that recording clears the AVI rather than encoding it again.
+
+### The one flag that would go wrong quietly
+
+`-fps_mode passthrough`. These recordings run at whatever rate the radio left
+room for, and ffmpeg's default is to force a constant rate by duplicating and
+dropping frames. That would put a different number of frames in the MP4 than the
+AVI holds, which is both a worse recording and a failure of the check that lets
+the AVI go. Measured across the whole archive, frame counts and durations come
+out identical, odd rates like 26625/1249 included.
+
+### Settings
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `-transcode` | `true` | Re-encode stored recordings, when ffmpeg is there |
+| `-transcode-crf` | `24` | H.264 quality: lower is better and larger, 0 to 51 |
+| `-ffmpeg` | `ffmpeg` | The binary, by name on PATH or by path |
+| `-transcode-backfill-gap` | `10s` | Pause between recordings of an archive already held |
+
+Measured on the same twenty recordings from these cameras, 73.6MB of MJPEG:
+CRF 20 gives 1.37x, CRF 24 gives 2.13x, CRF 28 gives 4.15x.
+
+The x264 preset is not a setting. On this footage `veryfast` produced 34.6MB
+where `medium` produced 38.7MB, and did it in half the time: CRF holds quality
+constant, and the sensor noise these cameras make is what the slower presets
+spend their extra effort preserving. There is nothing to offer an operator in a
+knob whose every other position is worse.
+
+### Graceful absence
+
+ffmpeg is looked for once, at startup. A machine without it logs one line and
+carries on:
+
+```
+nvr: recordings: transcode: no ffmpeg on this machine, so recordings stay as AVI (exec: "ffmpeg": executable file not found in $PATH)
+```
+
+Nothing else changes: recordings are pulled, held, listed, replayed and served
+exactly as before, in the form they arrived in.
+
+### What the API gained
+
+`GET /api/recordings` carries `format` on every recording, `avi` or `mp4`. It is
+what a caller reads to know whether it can hand the recording to a video element
+or has to replay it frame by frame.
+
+`GET /api/recordings/{cameraId}/{day}/{at}` serves whichever form is held, as
+`video/mp4` or `video/x-msvideo`, from the same URL as before. Both extensions
+are accepted and ignored, so a link written down while a recording was an AVI
+still finds it afterwards.
+
+The two replay routes answer `415` for a transcoded recording, saying to play it
+from the recording URL instead. They exist only because nothing decodes MJPEG in
+AVI, and an MP4 needs none of them.
+
+`GET /api/storage` gained `transcoded`, which is how many of the held recordings
+are MP4. It is the progress of a backfill.
+
+The recording and its frame index are now cached with `no-cache` rather than for
+a day. They used to be immutable; transcoding changes the bytes at a URL without
+changing the URL, and a browser holding this morning's AVI would keep replaying
+it long after the service had an MP4 to offer. `ServeContent` answers the
+revalidation from the modification time, so the body is still not sent twice.
+
+### What the interface does
+
+The Files view is unchanged. The player is two players: a recording held as MP4
+gets a `<video>` pointed at the recording URL, with play, pause, seeking,
+buffering and a timeline that are all the browser's own, and everything the
+frame-by-frame replay needs is skipped. A recording held as AVI plays exactly as
+it did before, through the multipart replay, the scrubber built from the frame
+index, and the canvas that holds the paused frame.
+
+A recording that is transcoded while the listing is on screen is the third case.
+The index request answers 415, and the player reads that as "play it" rather
+than as an error, so a page a moment out of date shows a video instead of a
+failure.
+
+### The image
+
+The service image is distroless: no package manager, no shell, nothing to run an
+install with. A static binary copied in is the only way to add a program to it.
+
+The ready-made static ffmpeg builds are 80 to 135MB, because they carry every
+codec there is. This one is configured down to what the service asks of it: read
+MJPEG in AVI, write H.264 in MP4, read that back, decode it to a frame count.
+That is a 5.7MB binary and about a minute of build time that a layer cache
+spends once.
+
+| | size |
+|---|---|
+| The image without ffmpeg | 19.1MB |
+| The image with it | 27.1MB |
+
+The design above guessed 90MB. That was the cost of not building it.
+
+### Measured on this archive
+
+306 real recordings from two cameras, 57,682 frames, transcoded by the service
+in its own container at CRF 24.
+
+| | before | after |
+|---|---|---|
+| Size | 1209.1MB | 523.6MB |
+| Frames | 57,682 | 57,682 |
+
+2.31x over the archive, 685.5MB saved, 56.7% of it. Per recording the worst was
+1.12x, the median 2.40x and the best 6.83x, with 222 of the 306 at 2x or better.
+Frame counts matched on every one of them, and no recording failed to encode.
+The whole archive took 6 minutes 31 seconds on one core at nice 10, which is
+1.28 seconds a recording.
+
+The design's table above measured one recording at 6.0x. That recording is
+`15c978ef14874428/2026-08-30/131529`, and it came out at 6.83x here. The archive
+as a whole is less than half that, because most of these are 640x480 night
+frames where the noise is the content, and noise is what H.264 cannot throw
+away. 2.31x is the honest number for this footage, not a tenth of the size.
+
+### What was proved before this was trusted with real footage
+
+- An encode cut short on the way out: the decode fails, the AVI is kept byte for
+  byte, and the log says so.
+- An encode that quietly holds fewer frames: "the encode of
+  `b10eef5f74be3c86/2026-08-30/121546` holds 40 frames against the AVI's 77, so
+  the AVI is kept".
+- A recording whose AVI cannot be indexed: ffmpeg is never run on it at all.
+- A machine with no ffmpeg: the service starts, says so once, and serves.
+- Playback, in a headless browser against this archive: a transcoded recording
+  reaches `readyState` 4, reports its real duration, seeks to the middle and
+  plays on from there; an untranscoded one replays through the `<img>` and its
+  position advances from frame 1 to frame 50 in two seconds.

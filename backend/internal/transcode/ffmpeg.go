@@ -135,9 +135,9 @@ func (f *FFmpeg) Encode(ctx context.Context, src, dst string) error {
 // This is a full decode, not a look at the header, which is the point: a file
 // whose header claims a recording it does not hold, or that was cut short
 // between being written and being checked, does not decode to the frame count
-// it is compared against. ffprobe would answer faster from the sample table,
-// but the sample table is exactly what a truncated file lies about, and leaving
-// ffprobe out of the image saves shipping a second seventy megabyte binary.
+// it is compared against. Reading the sample table would be faster and would
+// answer the wrong question, because the sample table is exactly what a
+// truncated file lies about. It is also why the image carries no ffprobe.
 func (f *FFmpeg) Frames(ctx context.Context, path string) (int, error) {
 	cmd := exec.CommandContext(ctx, f.bin,
 		"-nostdin", "-hide_banner", "-loglevel", "error",
@@ -162,8 +162,9 @@ func (f *FFmpeg) Frames(ctx context.Context, path string) (int, error) {
 	}
 	lower(cmd)
 	frames, scanErr := lastFrameCount(out)
-	// The pipe is drained above; whatever is left is discarded so a decode that
-	// outruns the reader cannot block on a full pipe.
+	// That reads to the end of the stream in the normal case. Draining what is
+	// left covers the one where it stopped early, so a decode that outruns the
+	// reader cannot block on a pipe nobody is emptying.
 	io.Copy(io.Discard, out)
 	if err := cmd.Wait(); err != nil {
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
