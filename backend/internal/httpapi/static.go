@@ -2,12 +2,29 @@ package httpapi
 
 import (
 	"context"
+	"mime"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
 	"time"
 )
+
+func init() {
+	// Go's table does not carry this one, and a manifest served as text/plain is
+	// a manifest the browser ignores, which shows up as an app that simply
+	// refuses to install with nothing to explain why.
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
+}
+
+// neverCached are the files that decide which version of everything else a
+// browser is running. A service worker cached for a year is a service worker
+// that cannot be replaced by deploying, and the manifest is what an installed
+// app reads to find its own icons.
+var neverCached = map[string]bool{
+	"/sw.js":                true,
+	"/manifest.webmanifest": true,
+}
 
 func contextWithTimeout(r *http.Request, d time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(r.Context(), d)
@@ -23,7 +40,11 @@ func spaHandler(dir string) http.Handler {
 	index := filepath.Join(dir, "index.html")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if exists(root, path.Clean("/"+r.URL.Path)) {
+		clean := path.Clean("/" + r.URL.Path)
+		if exists(root, clean) {
+			if neverCached[clean] {
+				w.Header().Set("Cache-Control", "no-cache")
+			}
 			files.ServeHTTP(w, r)
 			return
 		}
