@@ -299,3 +299,63 @@ needs no change here.
 
 Absent when the camera has not answered. Read on the same poll as everything
 else rather than on its own timer: it changes about once a day.
+
+## Making a recording a tenth of its size
+
+Written before it is built. Decided here rather than in the code because one
+choice changes the image everything else ships in.
+
+### Why
+
+MJPEG stores every frame whole, knowing nothing of the frame before it. On a
+scene that mostly does not move, which is what a security camera watches, almost
+all of that is waste. Measured on a real recording from these cameras, ten
+seconds of 800x600 at 21 fps:
+
+| | size | ratio |
+|---|---|---|
+| MJPEG in AVI, as stored today | 11.69 MB | |
+| H.264 in MP4, CRF 24 | 1.96 MB | 6.0x |
+| H.264 in MP4, CRF 28 | 0.66 MB | 17.7x |
+
+Encoding took 0.4 seconds. An evening's 462MB becomes 77MB.
+
+The second gain is not about size. A browser decodes H.264 natively, so playback
+becomes a `<video>` element with seeking, buffering and a timeline that the
+browser provides. The multipart replay this service does today exists only
+because no browser decodes MJPEG in AVI.
+
+### The dependency, which is the real decision
+
+Nothing in Go encodes H.264 well. This needs ffmpeg, and the image is currently
+distroless: 17.8MB with no shell and no libraries. Adding ffmpeg takes it to
+roughly 90MB.
+
+That is worth it, but it must not be required. The service runs without ffmpeg
+and simply does not transcode: recordings stay as AVI and play through the
+existing replay. Anything else makes a missing binary into a service that will
+not start, which is a bad trade for a feature about saving disk.
+
+### The order that matters
+
+Transcoding happens **after** a recording is safely stored, never between the
+camera and the disk. A transcode that fails must cost a larger file, not the
+recording.
+
+It also happens after anything that reads pixels. MJPEG is every frame a
+keyframe, so a single frame can be pulled out and decoded alone; H.264 makes
+frames depend on those before them. Detection, when it arrives, reads the MJPEG
+and the transcode follows it.
+
+### The rules
+
+- One at a time, at low priority. A catch-up of two hundred recordings must not
+  compete with the live view for the machine.
+- The AVI is deleted only after the MP4 is written and verified to hold the same
+  number of frames. Anything less and a bad encode silently replaces footage.
+- A recording keeps its identity: same camera, same day, same start time, a
+  different extension. Nothing that already points at a recording breaks.
+- CRF is a setting, not a constant. 24 is the default; someone watching a
+  driveway may want 20 and someone watching a corridor 28.
+- The interface prefers the MP4 when it exists and falls back to the replay when
+  it does not, so a half transcoded archive is not a half broken one.
