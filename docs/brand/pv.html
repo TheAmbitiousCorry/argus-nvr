@@ -1,0 +1,10 @@
+<body style="margin:0;background:#111;color:#ddd;display:flex;gap:50px;align-items:center;justify-content:center;height:100vh;font-family:sans-serif">
+<div style="text-align:center"><p>eye 120px</p><div id=a></div></div>
+<div style="text-align:center"><p>eye 28px</p><div id=d></div></div>
+<div style="text-align:center"><p>mark 260px</p><div id=b></div></div>
+<div style="text-align:center"><p>mark 30px</p><div id=c></div></div>
+</body><script>
+const put=(f,id,w)=>fetch(f).then(r=>r.text()).then(t=>{const e=document.getElementById(id);e.innerHTML=t;e.querySelector('svg').style.width=w});
+put('argus-eye.svg','a','120px');put('argus-eye.svg','d','28px');
+put('argus-mark.svg','b','260px');put('argus-mark.svg','c','30px');
+</script>

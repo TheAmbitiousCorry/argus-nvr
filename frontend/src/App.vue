@@ -19,21 +19,54 @@ const backend = computed(() => {
       <RouterLink class="brand" to="/">
         <!-- Argus Panoptes, who watched with a hundred eyes and never closed
              more than half of them. One eye of him is a camera. -->
-        <svg class="mark" viewBox="0 0 120 108" fill="none" stroke="currentColor"
-             stroke-width="6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M60 6v5M50 9l3 5M70 9l-3 5" />
-          <path d="M46 22c4-6 8-9 14-9s10 3 14 9c-4 6-8 9-14 9s-10-3-14-9z" />
-          <circle cx="60" cy="22" r="5" /><circle cx="60" cy="22" r="1.8" fill="currentColor" />
-          <path d="M60 31c0 12-5 16-5 28s5 14 5 22" />
-          <path d="M24 24v4M15 27l3 4M33 27l-3 4" />
-          <path d="M11 38c4-5 7-8 13-8s9 3 13 8c-4 5-7 8-13 8s-9-3-13-8z" />
-          <circle cx="24" cy="38" r="4.5" /><circle cx="24" cy="38" r="1.6" fill="currentColor" />
-          <path d="M24 46c0 12 6 15 10 24s2 14 8 18" />
-          <path d="M96 24v4M87 27l3 4M105 27l-3 4" />
-          <path d="M83 38c4-5 7-8 13-8s9 3 13 8c-4 5-7 8-13 8s-9-3-13-8z" />
-          <circle cx="96" cy="38" r="4.5" /><circle cx="96" cy="38" r="1.6" fill="currentColor" />
-          <path d="M96 46c0 12-6 15-10 24s-2 14-8 18" />
-          <path d="M60 79c14 0 24 6 24 14s-10 14-24 14-24-6-24-14 9-11 18-11 14 4 14 9-4 6-8 6-6-2-6-4" />
+        <svg class="mark" viewBox="0 0 200 158" fill="none" stroke="currentColor"
+             stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d='M90.9 112.0Q42.2 93.7 30.0 75.4'/>
+          <path d='M95.3 112.0Q70.3 83.6 64.0 55.1'/>
+          <path d='M100.0 112.0Q100.0 79.4 100.0 46.8'/>
+          <path d='M104.7 112.0Q129.7 83.6 136.0 55.1'/>
+          <path d='M109.1 112.0Q157.8 93.7 170.0 75.4'/>
+          <path d='M11.6 56.0Q30.0 36.0 48.4 56.0Q30.0 76.0 11.6 56.0Z'/>
+          <circle cx='30.0' cy='56.0' r='5.2'/>
+          <circle cx='30.0' cy='56.0' r='1.6' fill='currentColor'/>
+          <path d='M17.5 46.8L5.5 38.7'/>
+          <path d='M22.9 41.5L16.1 28.7'/>
+          <path d='M30.0 39.6L30.0 25.1'/>
+          <path d='M37.1 41.5L43.9 28.7'/>
+          <path d='M42.5 46.8L54.5 38.7'/>
+          <path d='M42.1 32.0Q64.0 8.2 85.9 32.0Q64.0 55.8 42.1 32.0Z'/>
+          <circle cx='64.0' cy='32.0' r='6.2'/>
+          <circle cx='64.0' cy='32.0' r='1.6' fill='currentColor'/>
+          <path d='M49.8 21.5L35.9 12.1'/>
+          <path d='M56.0 15.5L48.1 0.6'/>
+          <path d='M64.0 13.3L64.0 -3.5'/>
+          <path d='M72.0 15.5L79.9 0.6'/>
+          <path d='M78.2 21.5L92.1 12.1'/>
+          <path d='M74.6 20.0Q100.0 -7.5 125.4 20.0Q100.0 47.5 74.6 20.0Z'/>
+          <circle cx='100.0' cy='20.0' r='7.2'/>
+          <circle cx='100.0' cy='20.0' r='1.6' fill='currentColor'/>
+          <path d='M84.1 8.2L68.2 -2.5'/>
+          <path d='M91.0 1.4L82.0 -15.5'/>
+          <path d='M100.0 -1.1L100.0 -20.2'/>
+          <path d='M109.0 1.4L118.0 -15.5'/>
+          <path d='M115.9 8.2L131.8 -2.5'/>
+          <path d='M114.1 32.0Q136.0 8.2 157.9 32.0Q136.0 55.8 114.1 32.0Z'/>
+          <circle cx='136.0' cy='32.0' r='6.2'/>
+          <circle cx='136.0' cy='32.0' r='1.6' fill='currentColor'/>
+          <path d='M121.8 21.5L107.9 12.1'/>
+          <path d='M128.0 15.5L120.1 0.6'/>
+          <path d='M136.0 13.3L136.0 -3.5'/>
+          <path d='M144.0 15.5L151.9 0.6'/>
+          <path d='M150.2 21.5L164.1 12.1'/>
+          <path d='M151.6 56.0Q170.0 36.0 188.4 56.0Q170.0 76.0 151.6 56.0Z'/>
+          <circle cx='170.0' cy='56.0' r='5.2'/>
+          <circle cx='170.0' cy='56.0' r='1.6' fill='currentColor'/>
+          <path d='M157.5 46.8L145.5 38.7'/>
+          <path d='M162.9 41.5L156.1 28.7'/>
+          <path d='M170.0 39.6L170.0 25.1'/>
+          <path d='M177.1 41.5L183.9 28.7'/>
+          <path d='M182.5 46.8L194.5 38.7'/>
+          <path d='M100 113c-24 1-37 8-37 18s15 17 34 17 38-7 38-17-10-15-23-15-19 5-19 11 6 9 11 9 9-3 9-6-3-5-6-5'/>
         </svg>
         <span>Argus</span>
       </RouterLink>
