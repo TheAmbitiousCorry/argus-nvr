@@ -11,6 +11,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -140,6 +141,14 @@ type device struct {
 	// two seconds.
 	firmware   json.RawMessage
 	firmwareAt time.Time
+	// mac is the camera's own name for itself, read from /version. It is what
+	// recordings are filed under, because an identifier this service generates
+	// is lost the moment a camera is removed and added back: the footage
+	// already pulled off it is orphaned and every byte of it downloaded again.
+	mac string
+	// migrated stops the one-time move of recordings filed under the generated
+	// identifier from being attempted on every poll.
+	migrated bool
 
 	// captureMissing records that this firmware has no /capture route, so the
 	// snapshot path stops asking for it after the first 404. The live camera's
@@ -406,8 +415,82 @@ func (d *device) pollFirmware(ctx context.Context) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.firmwareAt = time.Now()
-	if err == nil {
-		d.firmware = body
+	if err != nil {
+		return
+	}
+	d.firmware = body
+	newMAC := macOf(body)
+	if newMAC != "" && newMAC != d.mac {
+		d.mac = newMAC
+	}
+	migrate := newMAC != "" && !d.migrated
+	d.mu.Unlock()
+	if migrate {
+		d.migrateArchive()
+	}
+	d.mu.Lock()
+}
+
+// macOf reads the camera's MAC out of its /version document. Absent from
+// firmware older than the field, which is why nothing here fails without it.
+func macOf(body json.RawMessage) string {
+	var doc struct {
+		MAC string `json:"mac"`
+	}
+	if json.Unmarshal(body, &doc) != nil {
+		return ""
+	}
+	mac := strings.ToLower(strings.TrimSpace(doc.MAC))
+	for _, c := range mac {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return ""
+		}
+	}
+	if len(mac) != 12 {
+		return ""
+	}
+	return mac
+}
+
+// archiveKey is the directory recordings are filed under: the camera's MAC when
+// it has said, and the identifier this service generated when it has not.
+//
+// Falling back rather than waiting matters. A camera added and immediately
+// unreachable would otherwise have its footage filed under nothing, and the
+// migration below moves anything filed under the old key across the first time
+// the camera does answer.
+func (d *device) archiveKey() string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if d.mac != "" {
+		return d.mac
+	}
+	return d.cam.ID
+}
+
+// migrateArchive moves recordings filed under the generated identifier to the
+// camera's MAC, once, the first time the camera says what its MAC is.
+//
+// A recording already at the destination is left alone and the source copy
+// removed: they are the same recording, and the destination is the one the rest
+// of the service can find.
+func (d *device) migrateArchive() {
+	d.mu.Lock()
+	if d.migrated || d.mac == "" || d.mac == d.cam.ID || d.arch == nil {
+		d.mu.Unlock()
+		return
+	}
+	d.migrated = true
+	from, to := d.cam.ID, d.mac
+	d.mu.Unlock()
+
+	moved, err := d.arch.MoveCamera(from, to)
+	if err != nil {
+		log.Printf("camera %s: could not file recordings under %s: %v", d.cam.Name, to, err)
+		return
+	}
+	if moved > 0 {
+		log.Printf("camera %s: filed %d recording(s) under %s", d.cam.Name, moved, to)
 	}
 }
 

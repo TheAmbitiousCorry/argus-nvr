@@ -159,7 +159,7 @@ func (d *device) finish(p *archive.Pending) {
 func (d *device) freeID(at time.Time) (archive.ID, error) {
 	for i := 0; i < 60; i++ {
 		id := archive.ID{
-			CameraID: d.cam.ID,
+			CameraID: d.archiveKey(),
 			Day:      at.Format("2006-01-02"),
 			At:       at.Format("150405"),
 		}

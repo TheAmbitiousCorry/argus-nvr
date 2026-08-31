@@ -13,7 +13,7 @@ import urllib.parse
 
 BRAND = pathlib.Path(__file__).resolve().parent
 NVR = BRAND.parent.parent
-FW = NVR.parent / "esp32-cam-fw"
+FW = NVR.parent / "argus-cam"
 
 
 def load(name):

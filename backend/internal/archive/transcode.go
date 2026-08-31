@@ -118,6 +118,19 @@ func (s *Store) Transcode(ctx context.Context, id ID, enc Encoder) (Transcoded, 
 		return Transcoded{}, fmt.Errorf("the encode of %s is empty, so the AVI is kept", id)
 	}
 
+	// An encode that came out no smaller is a worse recording than the one
+	// already held: the same footage, generationally re-compressed, in a
+	// container that has to be decoded to seek. The point of this is disk, so
+	// when it does not save any there is nothing to weigh against the loss.
+	//
+	// It happens on very short or very noisy clips, where H.264 has almost no
+	// redundancy to remove and pays its container overhead anyway.
+	if before, err := os.Stat(src); err == nil && info.Size() >= before.Size() {
+		return Transcoded{}, fmt.Errorf(
+			"the encode of %s is %d bytes against the AVI's %d, so the AVI is kept",
+			id, info.Size(), before.Size())
+	}
+
 	// Retention runs on its own timer and may have aged this recording out
 	// while it was being encoded. Renaming the MP4 in now would bring back
 	// footage the archive has already decided to let go, and the day's note

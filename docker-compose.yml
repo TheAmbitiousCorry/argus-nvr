@@ -1,3 +1,9 @@
+# Pinned so the project, and with it the volume holding every recording, does
+# not change name when this directory does. Compose otherwise names the project
+# after the folder, and renaming the folder points the service at a new, empty
+# volume with the old one left behind looking like lost footage.
+name: argus-nvr
+
 services:
   nvr:
     build: .

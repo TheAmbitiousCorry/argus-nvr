@@ -1,6 +1,6 @@
 // Package avi wraps a run of JPEG frames in an AVI container.
 //
-// This is the same job the firmware does in esp32-cam-fw/src/avi.cpp, and the
+// This is the same job the firmware does in argus-cam/src/avi.cpp, and the
 // bytes it writes are the same bytes, so a recording the service made on a
 // camera's behalf and one it pulled off that camera's card play identically. A
 // bare run of JPEGs carries no timing at all: mpv shows one as a folder of

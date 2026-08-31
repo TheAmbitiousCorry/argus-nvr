@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -887,4 +888,81 @@ func (s *Store) Meta(id ID) (Meta, error) {
 		return Meta{}, ErrNotFound
 	}
 	return s.readMeta(id), nil
+}
+
+// MoveCamera files every recording held under one camera key into another, and
+// returns how many it moved.
+//
+// This exists because recordings were once filed under an identifier this
+// service generated. Removing a camera and adding it back minted a new one, so
+// the footage already pulled off that camera was orphaned and every byte of it
+// downloaded again. The camera's MAC is the one name it owns, and this is the
+// one-time move to it.
+//
+// A recording already present at the destination is not overwritten: it is the
+// same recording, and the copy the rest of the service can find is the one that
+// should survive. The source copy is removed so the move actually reclaims the
+// disk it was meant to.
+func (s *Store) MoveCamera(from, to string) (int, error) {
+	if !validCameraID(from) || !validCameraID(to) || from == to {
+		return 0, fmt.Errorf("archive: cannot move %q to %q", from, to)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	src := filepath.Join(s.root, from)
+	if _, err := os.Stat(src); errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	} else if err != nil {
+		return 0, err
+	}
+
+	days, err := os.ReadDir(src)
+	if err != nil {
+		return 0, err
+	}
+
+	moved := 0
+	for _, day := range days {
+		if !day.IsDir() || !ValidDay(day.Name()) {
+			continue
+		}
+		srcDay := filepath.Join(src, day.Name())
+		dstDay := filepath.Join(s.root, to, day.Name())
+		if err := os.MkdirAll(dstDay, 0o755); err != nil {
+			return moved, err
+		}
+		entries, err := os.ReadDir(srcDay)
+		if err != nil {
+			return moved, err
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			srcFile := filepath.Join(srcDay, e.Name())
+			dstFile := filepath.Join(dstDay, e.Name())
+			if _, err := os.Stat(dstFile); err == nil {
+				// Already held under the new key. Drop the duplicate rather
+				// than keeping two copies of one recording.
+				if err := os.Remove(srcFile); err != nil {
+					return moved, err
+				}
+				continue
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				return moved, err
+			}
+			if err := os.Rename(srcFile, dstFile); err != nil {
+				return moved, err
+			}
+			if strings.HasSuffix(e.Name(), ".avi") || strings.HasSuffix(e.Name(), ".mp4") {
+				moved++
+			}
+		}
+		// Empty now, or holding something this does not recognise; either way
+		// a failure to remove it is not worth failing the move over.
+		_ = os.Remove(srcDay)
+	}
+	_ = os.Remove(src)
+	return moved, nil
 }

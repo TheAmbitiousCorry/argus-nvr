@@ -132,7 +132,7 @@ func (d *device) listDays(ctx context.Context) ([]string, error) {
 // pullDay downloads everything in one day that the archive does not already
 // hold, one recording at a time.
 func (d *device) pullDay(ctx context.Context, day string) (int, error) {
-	held, err := d.arch.Held(d.cam.ID, day)
+	held, err := d.arch.Held(d.archiveKey(), day)
 	if err != nil {
 		return 0, err
 	}
@@ -194,7 +194,7 @@ func (d *device) download(ctx context.Context, day string, r camera.Recording) e
 	}
 	defer resp.Body.Close()
 
-	id := archive.ID{CameraID: d.cam.ID, Day: day, At: r.At}
+	id := archive.ID{CameraID: d.archiveKey(), Day: day, At: r.At}
 	bytes, err := d.arch.Save(id, resp.Body, archive.Meta{
 		DurMs:  r.DurMs,
 		Frames: r.Frames,
